@@ -1,5 +1,5 @@
-{
-  "name": "locus",
+﻿{
+  "name": "gama-hyper-physics",
   "version": "1.0.0",
   "description": "> **Deterministic AST Safety Guard, High-Throughput Compound Pipelines, Bidirectional Intent & Contract Synthesizer, Polyglot Cross-Module Graph, and Zero-Dependency Model Context Protocol (MCP) Server in Pure Safe Rust.**",
   "main": "index.js",
@@ -29,3 +29,4 @@
     "vite": "^8.2.2"
   }
 }
+

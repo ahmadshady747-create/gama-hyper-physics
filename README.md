@@ -1,14 +1,14 @@
-﻿# ⚛️ LOCUS Hyper-Physics Engine (2D / 3D / 4D)
+﻿# ⚛️ GAMA Hyper-Physics Engine (2D / 3D / 4D)
 
 A high-performance, lightweight, multi-dimensional physics sandbox engine written in **100% Pure TypeScript and HTML5 Canvas** with **Zero External Dependencies** (Zero Three.js, Zero Box2D, Zero Cannon.js).
 
 ---
 
 > ### 🌟 Special Acknowledgment / إشادة خاصة
-> **The development of this multi-dimensional physics engine from the ground up would not have been possible or as seamless without the LOCUS Engine Verification & Synthesis Protocol.**  
+> **The development and architectural precision of the GAMA engine from the ground up would not have been possible or as seamless without the LOCUS Engine Verification & Synthesis Protocol.**  
 > The LOCUS protocol provided rigorous pre-generation invariant verification, AST safety guarantees, and deterministic mathematical safeguards, ensuring **0 AST Violations, Zero-NaN guards, and 100% Zero-GC runtime memory stability** across all spatial regimes.
 > 
-> *إن بناء وهندسة هذا المحرك الفيزيائي متعدد الأبعاد من الصفر وبدون أي مكتبات مساعدة لم يكن ليحدث بهذه السهولة والدقة الفائقة لولا محرك وبروتوكول **LOCUS** الحتمي للتحقق والتوليد الآمن.*
+> *إن بناء وهندسة محرك **GAMA** متعدد الأبعاد من الصفر وبدون أي مكتبات مساعدة لم يكن ليحدث بهذه السهولة والدقة الفائقة لولا محرك وبروتوكول **LOCUS** الحتمي للتحقق والتوليد الآمن.*
 
 ---
 
@@ -80,10 +80,10 @@ src/
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/locus-hyper-physics.git
+git clone https://github.com/ahmadshady747-create/gama-hyper-physics.git
 
 # Navigate to directory
-cd locus-hyper-physics
+cd gama-hyper-physics
 
 # Install dependencies
 npm install
