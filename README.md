@@ -1,6 +1,6 @@
-﻿# ⚛️ GAMA Hyper-Physics Engine (2D / 3D / 4D)
+﻿# ⚛️ GAMA Hyper-Physics Engine (2D / 3D / 4D) & MCP Server
 
-A high-performance, lightweight, multi-dimensional physics sandbox engine written in **100% Pure TypeScript and HTML5 Canvas** with **Zero External Dependencies** (Zero Three.js, Zero Box2D, Zero Cannon.js).
+A high-performance, lightweight, multi-dimensional physics sandbox and **Model Context Protocol (MCP) Server** written in **100% Pure TypeScript and HTML5 Canvas** with **Zero External Dependencies** (Zero Three.js, Zero Box2D, Zero Cannon.js).
 
 ---
 
@@ -9,6 +9,46 @@ A high-performance, lightweight, multi-dimensional physics sandbox engine writte
 > The LOCUS protocol provided rigorous pre-generation invariant verification, AST safety guarantees, and deterministic mathematical safeguards, ensuring **0 AST Violations, Zero-NaN guards, and 100% Zero-GC runtime memory stability** across all spatial regimes.
 > 
 > *إن بناء وهندسة محرك **GAMA** متعدد الأبعاد من الصفر وبدون أي مكتبات مساعدة لم يكن ليحدث بهذه السهولة والدقة الفائقة لولا محرك وبروتوكول [**LOCUS Engine**](https://github.com/ahmadshady747-create/LOCUS) الحتمي للتحقق والتوليد الآمن.*
+
+---
+
+## 🔌 Model Context Protocol (MCP) Server Integration
+
+GAMA is equipped with a full-fledged **MCP Server (`src/mcp/server.ts`)** compliant with the standard **Model Context Protocol (JSON-RPC 2.0)**. It enables AI coding agents (such as Google Antigravity, Claude Desktop, Cursor, and Gemini CLI) to execute multi-dimensional physics calculations, simulate trajectories, and compute 4D hyper-rotations dynamically on-demand.
+
+### 🛠️ Exposed MCP Tools
+
+| MCP Tool Name | Spatial Regime | Description |
+| :--- | :--- | :--- |
+| **`gama_simulate_2d`** | 2D | Simulates arbitrary 2D bodies with SAT collision resolution, Baumgarte stabilization, and Coulomb friction. Returns body trajectories and contact manifolds. |
+| **`gama_simulate_3d`** | 3D | Executes 3D rigid body simulation using 15-axis SAT, Unit Quaternions $SO(3)$, and dynamic $3\times 3$ Inverse Inertia Tensors. |
+| **`gama_simulate_4d`** | 4D Hyper | Simulates 4D Hyper-Physics with 6-plane $SO(4)$ hyper-rotations, Tesseract 8-cell geometry, and $S^3$ Hyperspheres. |
+| **`gama_rotate_4d_vector`** | 4D Math | Rotates 4D hyper-vectors $(x, y, z, w)$ across any of the 6 orthogonal planes $(xy, xz, xw, yz, yw, zw)$ by angle $\theta$ (radians). |
+| **`gama_project_4d`** | 4D Projection | Computes dual-stage $4\text{D} \rightarrow 3\text{D} \rightarrow 2\text{D}$ perspective projection with singularity guards and $w$-depth chromatic shifts. |
+| **`gama_benchmark`** | Performance | Runs a high-throughput Zero-GC physics simulation benchmark across 2D, 3D, and 4D regimes and reports FPS capacity and latency in milliseconds. |
+
+### ⚙️ How to Configure in Antigravity, Claude, or Cursor
+
+Add GAMA to your `mcp_config.json` (located in `.agents/mcp_config.json` or `~/.gemini/config/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "gama": {
+      "command": "npx",
+      "args": ["tsx", "f:/GAMA/src/mcp/server.ts"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+
+### 🏃 Running MCP Server Standalone
+```bash
+npm run mcp
+```
 
 ---
 
@@ -39,32 +79,22 @@ A high-performance, lightweight, multi-dimensional physics sandbox engine writte
 
 ```text
 src/
-├── math/
-│   ├── vec2.ts             # 2D Vector Math (In-place & safe normalizations)
-│   ├── vec3.ts             # 3D Vector Math (Cross, Dot, In-place transformations)
-│   ├── vec4.ts             # 4D Hyper-Vector Math
-│   ├── quat.ts             # Unit Quaternions for 3D Orientations
-│   ├── mat4.ts             # 4x4 Matrices for View & Perspective Projections
-│   ├── rotor4d.ts          # SO(4) 6-Plane Hyper-Rotation Engine
-│   └── index.ts            # Math Module Barrel Export
+├── math/                   # 2D, 3D, 4D Vectors, Quaternions, 4x4 Matrices, SO(4) Rotors
+├── mcp/
+│   └── server.ts           # Model Context Protocol (MCP) Stdio JSON-RPC 2.0 Server
 ├── physics/
-│   ├── common/
-│   │   ├── types.ts        # IDimensionalEngine, MaterialProperties, DimensionMode
-│   │   └── pool.ts         # Pre-allocated Zero-GC Pools for 3D/4D Particles
-│   ├── engine2d/           # 2D SAT & Sequential Impulse Engine
-│   ├── engine3d/           # 3D 15-Axis SAT & Quat Inertia Simulator
-│   ├── engine4d/           # 4D Hyper-Collision & Hyperplane Bounding Cage
-│   └── index.ts            # Physics Module Barrel Export
+│   ├── common/             # Zero-GC Object Pools & Common Engine Interfaces
+│   ├── engine2d/           # 2D SAT & Sequential Impulse Simulator
+│   ├── engine3d/           # 3D 15-Axis SAT & Quaternion Inertia Simulator
+│   └── engine4d/           # 4D Hyper-Collision & Hyperplane Bounding Cage
 ├── render/
-│   ├── camera.ts           # 3D Orbit Camera (Azimuth, Elevation, Zoom, Pan)
+│   ├── camera.ts           # 3D Spherical Orbit Camera
 │   ├── projection4d.ts     # 4D -> 3D -> 2D Perspective Projection
-│   ├── renderer.ts         # Unified Canvas Renderer
-│   └── index.ts            # Render Module Barrel Export
+│   └── renderer.ts         # Unified Multi-Dimensional Canvas Renderer
 ├── ui/
-│   ├── sensor.ts           # Motion & Gyro Sensor Manager + Desktop Tilt Emulation
+│   ├── sensor.ts           # Real-World Motion Sensor Manager & Desktop Tilt Emulation
 │   ├── spawner.ts          # Interactive Body Spawner Tool
-│   ├── controls.ts         # Glassmorphism HUD Controller & Telemetry
-│   └── index.ts            # UI Module Barrel Export
+│   └── controls.ts         # Glassmorphic HUD Controller & Multi-Dimensional Grabbing
 ├── index.html              # Modern Glassmorphic HUD Layout
 └── main.ts                 # Application Bootstrap, Scene Presets & Animation Loop
 ```
@@ -79,7 +109,7 @@ src/
 
 ### Installation
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/ahmadshady747-create/gama-hyper-physics.git
 
 # Navigate to directory
@@ -89,7 +119,7 @@ cd gama-hyper-physics
 npm install
 ```
 
-### Running Locally
+### Running Locally (Interactive Canvas Sandbox)
 ```bash
 # Start Vite development server
 npm run dev
@@ -121,4 +151,3 @@ npm run build
 ## 📄 License
 
 This project is open-source software licensed under the [MIT License](LICENSE).
-

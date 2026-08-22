@@ -1,32 +1,37 @@
-﻿{
-  "name": "gama-hyper-physics",
-  "version": "1.0.0",
-  "description": "> **Deterministic AST Safety Guard, High-Throughput Compound Pipelines, Bidirectional Intent & Contract Synthesizer, Polyglot Cross-Module Graph, and Zero-Dependency Model Context Protocol (MCP) Server in Pure Safe Rust.**",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ahmadshady747-create/LOCUS.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/ahmadshady747-create/LOCUS/issues"
-  },
-  "homepage": "https://github.com/ahmadshady747-create/LOCUS#readme",
-  "devDependencies": {
-    "typescript": "^7.0.2",
-    "vite": "^8.2.2"
-  }
+{
+    "name": "gama-hyper-physics",
+    "version": "1.0.0",
+    "description": "GAMA Multi-Dimensional Physics Sandbox (2D / 3D / 4D Hyper-Physics) with Model Context Protocol (MCP) Server in Pure TypeScript",
+    "main": "index.js",
+    "directories": {
+        "test": "tests"
+    },
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview",
+        "typecheck": "tsc --noEmit",
+        "mcp": "tsx src/mcp/server.ts"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ahmadshady747-create/gama-hyper-physics.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/ahmadshady747-create/gama-hyper-physics/issues"
+    },
+    "homepage": "https://github.com/ahmadshady747-create/gama-hyper-physics#readme",
+    "devDependencies": {
+        "@types/node": "^26.2.0",
+        "typescript": "^7.0.2",
+        "vite": "^8.2.2"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.30.0",
+        "tsx": "^4.23.12"
+    }
 }
-

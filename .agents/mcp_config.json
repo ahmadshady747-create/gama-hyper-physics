@@ -1,0 +1,14 @@
+﻿{
+    "mcpServers":  {
+                       "gama":  {
+                                    "args":  [
+                                                 "tsx",
+                                                 "f:/GAMA/src/mcp/server.ts"
+                                             ],
+                                    "env":  {
+                                                "NODE_ENV":  "production"
+                                            },
+                                    "command":  "npx"
+                                }
+                   }
+}
