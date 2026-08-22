@@ -1,4 +1,4 @@
-﻿import { Vec3 } from './vec3';
+import { Vec3 } from './vec3';
 
 /**
  * Quat - High-performance Unit Quaternion mathematics engine for 3D physics.
@@ -176,6 +176,34 @@ export class Quat {
 
     this.normalizeSafe();
     return this;
+  }
+
+  public rotateVec3(v: Vec3, out?: Vec3): Vec3 {
+    return this.rotateVector(v, out || new Vec3());
+  }
+
+  public conjugate(): this {
+    return this.conjugateInPlace();
+  }
+
+  public normalize(): this {
+    return this.normalizeSafe();
+  }
+
+  public integrate(w: Vec3, dt: number): this {
+    return this.integrateAngularVelocity(w, dt);
+  }
+
+  public toRotationMatrix(out: [Vec3, Vec3, Vec3]): [Vec3, Vec3, Vec3] {
+    const x = this.x, y = this.y, z = this.z, w = this.w;
+    const xx = x * x, yy = y * y, zz = z * z;
+    const xy = x * y, xz = x * z, yz = y * z;
+    const wx = w * x, wy = w * y, wz = w * z;
+
+    out[0].set(1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy));
+    out[1].set(2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx));
+    out[2].set(2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy));
+    return out;
   }
 
   public magSq(): number {

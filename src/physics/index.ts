@@ -1,6 +1,10 @@
 ﻿export * from './common/types';
 export * from './common/pool';
+export * from './common/sleeping';
 export * from './particles';
+export * from './broadphase/bvh';
+export * from './shapes/capsule';
+export * from './queries/raycast';
 
 // 2D Physics Subsystem
 export * from './engine2d/body2d';

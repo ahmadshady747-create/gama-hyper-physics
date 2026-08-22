@@ -12,6 +12,7 @@
         "build": "tsc && vite build",
         "preview": "vite preview",
         "typecheck": "tsc --noEmit",
+        "test": "tsx tests/phase1_verification.ts",
         "mcp": "tsx src/mcp/server.ts"
     },
     "repository": {
@@ -20,7 +21,7 @@
     },
     "keywords": [],
     "author": "",
-    "license": "ISC",
+    "license": "MIT",
     "bugs": {
         "url": "https://github.com/ahmadshady747-create/gama-hyper-physics/issues"
     },

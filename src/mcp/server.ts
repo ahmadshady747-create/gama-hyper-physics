@@ -1,4 +1,10 @@
-﻿import * as readline from 'readline';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  Tool
+} from '@modelcontextprotocol/sdk/types.js';
 import { Vec2, Vec3, Vec4, Rotor4D } from '../math';
 import {
   PhysicsWorld2D,
@@ -10,25 +16,8 @@ import {
 } from '../physics';
 import { Projection4D } from '../render';
 
-interface JsonRpcRequest {
-  jsonrpc: string;
-  id?: number | string | null;
-  method: string;
-  params?: any;
-}
 
-interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id?: number | string | null;
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-    data?: any;
-  };
-}
-
-const TOOLS_MANIFEST = [
+const TOOLS_MANIFEST: Tool[] = [
   {
     name: 'gama_simulate_2d',
     description: 'Executes a 2D physics simulation step or multi-step trajectory using SAT collision resolution, Baumgarte stabilization, and Coulomb friction. Returns body states and contact events.',
@@ -192,85 +181,62 @@ const TOOLS_MANIFEST = [
 ];
 
 export class GamaMcpServer {
+  private server: Server;
   private proj4D = new Projection4D(450);
 
-  public handleRequest(req: JsonRpcRequest): JsonRpcResponse {
-    const id = req.id ?? null;
-
-    if (req.method === 'initialize') {
-      return {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          protocolVersion: '2024-11-05',
-          capabilities: {
-            tools: {
-              listChanged: false
-            }
-          },
-          serverInfo: {
-            name: 'gama-hyper-physics',
-            version: '1.0.0'
-          }
+  constructor() {
+    this.server = new Server(
+      {
+        name: 'gama-hyper-physics',
+        version: '1.0.0'
+      },
+      {
+        capabilities: {
+          tools: {}
         }
-      };
-    }
+      }
+    );
 
-    if (req.method === 'notifications/initialized' || req.method === 'initialized') {
-      return { jsonrpc: '2.0', id, result: {} };
-    }
+    this.setupHandlers();
+  }
 
-    if (req.method === 'ping') {
-      return { jsonrpc: '2.0', id, result: {} };
-    }
-
-    if (req.method === 'tools/list') {
+  private setupHandlers(): void {
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          tools: TOOLS_MANIFEST
-        }
+        tools: TOOLS_MANIFEST
       };
-    }
+    });
 
-    if (req.method === 'tools/call') {
-      const toolName = req.params?.name;
-      const args = req.params?.arguments || {};
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
       try {
-        const toolResult = this.executeTool(toolName, args);
+        const toolResult = this.executeTool(name, args || {});
         return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [
-              {
-                type: 'text',
-                text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2)
-              }
-            ]
-          }
+          content: [
+            {
+              type: 'text',
+              text: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2)
+            }
+          ]
         };
       } catch (err) {
         return {
-          jsonrpc: '2.0',
-          id,
-          error: {
-            code: -32000,
-            message: `Tool execution failed: ${String(err)}`
-          }
+          content: [
+            {
+              type: 'text',
+              text: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`
+            }
+          ],
+          isError: true
         };
       }
-    }
+    });
+  }
 
-    return {
-      jsonrpc: '2.0',
-      id,
-      error: {
-        code: -32601,
-        message: `Method not found: ${req.method}`
-      }
-    };
+  public async start(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error('GAMA Hyper-Physics MCP Server running on stdio');
   }
 
   private executeTool(name: string, args: any): any {
@@ -552,33 +518,12 @@ export class GamaMcpServer {
   }
 }
 
-// Start Stdio MCP Listener when run directly
-if (typeof process !== 'undefined' && process.stdin && process.stdout) {
-  const server = new GamaMcpServer();
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: false
-  });
+// Bootstrap and run MCP server
+const server = new GamaMcpServer();
+server.start().catch((err) => {
+  console.error('Fatal error starting GAMA MCP Server:', err);
+  process.exit(1);
+});
 
-  rl.on('line', (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      const request = JSON.parse(trimmed) as JsonRpcRequest;
-      const response = server.handleRequest(request);
-      process.stdout.write(JSON.stringify(response) + '\n');
-    } catch (err) {
-      const errorResp: JsonRpcResponse = {
-        jsonrpc: '2.0',
-        error: {
-          code: -32700,
-          message: `Parse error: ${String(err)}`
-        }
-      };
-      process.stdout.write(JSON.stringify(errorResp) + '\n');
-    }
-  });
-}
 
 

@@ -1,5 +1,11 @@
-﻿import { Vec3 } from '../../math/vec3';
+import { Vec3 } from '../../math/vec3';
 import { RigidBody3D } from './body3d';
+import {
+  Capsule3D,
+  testCapsuleVsCapsule3D,
+  testCapsuleVsSphere3D,
+  CapsuleHit3D
+} from '../shapes/capsule';
 
 /**
  * ContactManifold3D - Contact point details for 3D collisions.
@@ -59,12 +65,13 @@ export class ManifoldPool3D {
 
 const SCRATCH_RA = new Vec3();
 const SCRATCH_RB = new Vec3();
-const SCRATCH_VREL = new Vec3();
-const SCRATCH_IMPULSE = new Vec3();
-const SCRATCH_T1 = new Vec3();
-const SCRATCH_T2 = new Vec3();
-const SCRATCH_AXIS = new Vec3();
 const SCRATCH_TEMP = new Vec3();
+const SCRATCH_CAP_HIT: CapsuleHit3D = {
+  collided: false,
+  normal: new Vec3(),
+  penetration: 0,
+  contactPoint: new Vec3()
+};
 
 /**
  * CollisionSystem3D - High-performance 3D SAT Collision Detection & Impulse Solver.
@@ -120,13 +127,10 @@ export class CollisionSystem3D {
     const bPos = box.position;
     const bHalf = box.halfExtents;
 
-    // Transform sphere position into box local space
     SCRATCH_TEMP?.set(sPos.x - bPos.x, sPos.y - bPos.y, sPos.z - bPos.z);
-    const qBox = box.orientation.clone().conjugateInPlace();
-    const localSphere = new Vec3();
-    qBox.rotateVector(SCRATCH_TEMP, localSphere);
+    const qBox = box.orientation.clone().conjugate();
+    const localSphere = qBox.rotateVec3(SCRATCH_TEMP);
 
-    // Closest point in local space
     const cx = Math.max(-bHalf.x, Math.min(bHalf.x, localSphere.x));
     const cy = Math.max(-bHalf.y, Math.min(bHalf.y, localSphere.y));
     const cz = Math.max(-bHalf.z, Math.min(bHalf.z, localSphere.z));
@@ -142,11 +146,11 @@ export class CollisionSystem3D {
       return false;
     }
 
-    // World closest point
     const localClosest = new Vec3(cx, cy, cz);
-    const worldClosest = new Vec3();
-    box.orientation.rotateVector(localClosest, worldClosest);
-    worldClosest.addInPlace(bPos);
+    const worldClosest = box.orientation.rotateVec3(localClosest);
+    worldClosest.x += bPos.x;
+    worldClosest.y += bPos.y;
+    worldClosest.z += bPos.z;
 
     manifold.bodyA = sphere;
     manifold.bodyB = box;
@@ -156,24 +160,23 @@ export class CollisionSystem3D {
 
     const normal = manifold.normal;
     if (isInside) {
-      // Push along minimum face
-      const dFaceX = bHalf.x - Math.abs(localSphere.x);
-      const dFaceY = bHalf.y - Math.abs(localSphere.y);
-      const dFaceZ = bHalf.z - Math.abs(localSphere.z);
-      const minFace = Math.min(dFaceX, dFaceY, dFaceZ);
+      const dxFace = bHalf.x - Math.abs(localSphere.x);
+      const dyFace = bHalf.y - Math.abs(localSphere.y);
+      const dzFace = bHalf.z - Math.abs(localSphere.z);
+      const minFace = Math.min(dxFace, dyFace, dzFace);
 
-      const localN = new Vec3();
-      if (minFace === dFaceX) localN.x = localSphere.x > 0 ? 1 : -1;
-      else if (minFace === dFaceY) localN.y = localSphere.y > 0 ? 1 : -1;
-      else localN.z = localSphere.z > 0 ? 1 : -1;
+      let localNorm = new Vec3();
+      if (minFace === dxFace) localNorm.set(localSphere.x > 0 ? -1 : 1, 0, 0);
+      else if (minFace === dyFace) localNorm.set(0, localSphere.y > 0 ? -1 : 1, 0);
+      else localNorm.set(0, 0, localSphere.z > 0 ? -1 : 1);
 
-      box.orientation.rotateVector(localN, normal);
-      normal.negateInPlace();
+      const worldNorm = box.orientation.rotateVec3(localNorm);
+      normal.copy(worldNorm);
       manifold.penetration = sphere.radius + minFace;
     } else {
       const dist = Math.sqrt(distSq);
-      if (dist > 1e-6 && dist != 0) {
-        normal.set((worldClosest.x - sPos.x) / dist, (worldClosest.y - sPos.y) / dist, (worldClosest.z - sPos.z) / dist);
+      if (dist > 1e-6) {
+        normal.set((sPos.x - worldClosest.x) / dist, (sPos.y - worldClosest.y) / dist, (sPos.z - worldClosest.z) / dist);
         manifold.penetration = sphere.radius - dist;
       } else {
         normal.set(0, 1, 0);
@@ -183,63 +186,52 @@ export class CollisionSystem3D {
 
     const c0 = manifold.contacts.at(0);
     c0?.copy(worldClosest);
+
+    return true;
+  }
+
+  public static boxVsSphere(box: RigidBody3D, sphere: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const hit = CollisionSystem3D.sphereVsBox(sphere, box, manifold);
+    if (!hit) return false;
+    manifold.bodyA = box;
+    manifold.bodyB = sphere;
+    manifold.normal.negate();
     return true;
   }
 
   public static boxVsBox(a: RigidBody3D, b: RigidBody3D, manifold: ContactManifold3D): boolean {
     let minOverlap = Number.MAX_VALUE;
-    let chosenAxis: Vec3 | null = null;
+    const bestAxis = new Vec3();
 
     const axesA = a.axes;
     const axesB = b.axes;
 
-    // Test 3 Face Axes of Box A
-    for (let i = 0; i < 3; i++) {
-      const axis = axesA.at(i);
-      if (!axis) continue;
-      const overlap = CollisionSystem3D.getAxisOverlap(a, b, axis);
-      if (overlap <= 0) return false;
-      if (overlap < minOverlap) {
-        minOverlap = overlap;
-        chosenAxis = axis;
-      }
-    }
+    const axes: Vec3[] = [
+      axesA[0], axesA[1], axesA[2],
+      axesB[0], axesB[1], axesB[2]
+    ];
 
-    // Test 3 Face Axes of Box B
     for (let i = 0; i < 3; i++) {
-      const axis = axesB.at(i);
-      if (!axis) continue;
-      const overlap = CollisionSystem3D.getAxisOverlap(a, b, axis);
-      if (overlap <= 0) return false;
-      if (overlap < minOverlap) {
-        minOverlap = overlap;
-        chosenAxis = axis;
-      }
-    }
-
-    // Test 9 Cross Product Axes (Ai x Bj)
-    for (let i = 0; i < 3; i++) {
-      const axA = axesA.at(i);
-      if (!axA) continue;
       for (let j = 0; j < 3; j++) {
-        const axB = axesB.at(j);
-        if (!axB) continue;
-
-        Vec3.cross(axA, axB, SCRATCH_AXIS);
-        const mSq = SCRATCH_AXIS.magSq();
-        if (mSq < 1e-6) continue; // Parallel axes
-
-        SCRATCH_AXIS.normalizeSafe();
-        const overlap = CollisionSystem3D.getAxisOverlap(a, b, SCRATCH_AXIS);
-        if (overlap <= 0) return false;
-        if (overlap < minOverlap) {
-          minOverlap = overlap;
-          chosenAxis = SCRATCH_AXIS.clone();
+        const cross = axesA[i].cross(axesB[j]);
+        if (cross.lengthSq() > 1e-6) {
+          cross.normalize();
+          axes.push(cross);
         }
       }
     }
 
-    if (!chosenAxis) return false;
+    const len = axes.length;
+    for (let i = 0; i < len; i++) {
+      const axis = axes[i];
+      const overlap = CollisionSystem3D.getAxisOverlap(a, b, axis);
+      if (overlap <= 0) return false;
+
+      if (overlap < minOverlap) {
+        minOverlap = overlap;
+        bestAxis.copy(axis);
+      }
+    }
 
     manifold.bodyA = a;
     manifold.bodyB = b;
@@ -248,189 +240,218 @@ export class CollisionSystem3D {
     manifold.friction = Math.sqrt(a.friction * b.friction);
 
     const normal = manifold.normal;
-    const posA = a.position;
-    const posB = b.position;
-    const dirX = posB.x - posA.x;
-    const dirY = posB.y - posA.y;
-    const dirZ = posB.z - posA.z;
-
-    if (dirX * chosenAxis.x + dirY * chosenAxis.y + dirZ * chosenAxis.z < 0) {
-      normal.set(-chosenAxis.x, -chosenAxis.y, -chosenAxis.z);
+    const dir = new Vec3(b.position.x - a.position.x, b.position.y - a.position.y, b.position.z - a.position.z);
+    if (dir.dot(bestAxis) < 0) {
+      normal.set(-bestAxis.x, -bestAxis.y, -bestAxis.z);
     } else {
-      normal.set(chosenAxis.x, chosenAxis.y, chosenAxis.z);
+      normal.copy(bestAxis);
     }
 
-    // Approximate Contact Point (Midpoint of overlap)
     const c0 = manifold.contacts.at(0);
     c0?.set(
-      (posA.x + posB.x) * 0.5 + normal.x * (minOverlap * 0.5),
-      (posA.y + posB.y) * 0.5 + normal.y * (minOverlap * 0.5),
-      (posA.z + posB.z) * 0.5 + normal.z * (minOverlap * 0.5)
+      (a.position.x + b.position.x) * 0.5,
+      (a.position.y + b.position.y) * 0.5,
+      (a.position.z + b.position.z) * 0.5
     );
     manifold.contactCount = 1;
 
     return true;
   }
 
-  private static getAxisOverlap(a: RigidBody3D, b: RigidBody3D, axis: Vec3): number {
-    let minA = Number.MAX_VALUE, maxA = -Number.MAX_VALUE;
-    let minB = Number.MAX_VALUE, maxB = -Number.MAX_VALUE;
+  public static capsuleVsCapsule(a: RigidBody3D, b: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const capA = a.capsule || new Capsule3D(a.radius, a.length);
+    const capB = b.capsule || new Capsule3D(b.radius, b.length);
+    const hit = testCapsuleVsCapsule3D(capA, a.position, a.orientation, capB, b.position, b.orientation, SCRATCH_CAP_HIT);
+    if (!hit) return false;
 
-    for (let i = 0; i < 8; i++) {
-      const vA = a.vertices.at(i) ?? a.position;
-      const projA = vA.dot(axis);
-      if (projA < minA) minA = projA;
-      if (projA > maxA) maxA = projA;
-
-      const vB = b.vertices.at(i) ?? b.position;
-      const projB = vB.dot(axis);
-      if (projB < minB) minB = projB;
-      if (projB > maxB) maxB = projB;
-    }
-
-    return Math.min(maxA, maxB) - Math.max(minA, minB);
+    manifold.bodyA = a;
+    manifold.bodyB = b;
+    manifold.normal.copy(SCRATCH_CAP_HIT.normal);
+    manifold.penetration = SCRATCH_CAP_HIT.penetration;
+    manifold.restitution = Math.min(a.restitution, b.restitution);
+    manifold.friction = Math.sqrt(a.friction * b.friction);
+    manifold.contactCount = 1;
+    manifold.contacts[0].copy(SCRATCH_CAP_HIT.contactPoint);
+    return true;
   }
 
-  public static solveVelocity(manifold: ContactManifold3D): void {
+  public static capsuleVsSphere(capsule: RigidBody3D, sphere: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const cap = capsule.capsule || new Capsule3D(capsule.radius, capsule.length);
+    const hit = testCapsuleVsSphere3D(cap, capsule.position, capsule.orientation, sphere.position, sphere.radius, SCRATCH_CAP_HIT);
+    if (!hit) return false;
+
+    manifold.bodyA = capsule;
+    manifold.bodyB = sphere;
+    manifold.normal.copy(SCRATCH_CAP_HIT.normal);
+    manifold.penetration = SCRATCH_CAP_HIT.penetration;
+    manifold.restitution = Math.min(capsule.restitution, sphere.restitution);
+    manifold.friction = Math.sqrt(capsule.friction * sphere.friction);
+    manifold.contactCount = 1;
+    manifold.contacts[0].copy(SCRATCH_CAP_HIT.contactPoint);
+    return true;
+  }
+
+  public static sphereVsCapsule(sphere: RigidBody3D, capsule: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const hit = CollisionSystem3D.capsuleVsSphere(capsule, sphere, manifold);
+    if (!hit) return false;
+    manifold.bodyA = sphere;
+    manifold.bodyB = capsule;
+    manifold.normal.negate();
+    return true;
+  }
+
+  public static capsuleVsBox(capsule: RigidBody3D, box: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const cap = capsule.capsule || new Capsule3D(capsule.radius, capsule.length);
+    const p1 = new Vec3(), p2 = new Vec3();
+    cap.getSegment(capsule.position, capsule.orientation, p1, p2);
+
+    const dummyS1 = new RigidBody3D({ type: 'sphere', position: p1, radius: cap.radius });
+    const dummyS2 = new RigidBody3D({ type: 'sphere', position: p2, radius: cap.radius });
+    const m1 = new ContactManifold3D();
+    const m2 = new ContactManifold3D();
+
+    const hit1 = CollisionSystem3D.sphereVsBox(dummyS1, box, m1);
+    const hit2 = CollisionSystem3D.sphereVsBox(dummyS2, box, m2);
+
+    if (!hit1 && !hit2) return false;
+
+    const bestM = (hit1 && hit2) ? (m1.penetration > m2.penetration ? m1 : m2) : (hit1 ? m1 : m2);
+    manifold.bodyA = capsule;
+    manifold.bodyB = box;
+    manifold.normal.copy(bestM.normal);
+    manifold.penetration = bestM.penetration;
+    manifold.restitution = Math.min(capsule.restitution, box.restitution);
+    manifold.friction = Math.sqrt(capsule.friction * box.friction);
+    manifold.contactCount = 1;
+    manifold.contacts[0].copy(bestM.contacts[0]);
+    return true;
+  }
+
+  public static boxVsCapsule(box: RigidBody3D, capsule: RigidBody3D, manifold: ContactManifold3D): boolean {
+    const hit = CollisionSystem3D.capsuleVsBox(capsule, box, manifold);
+    if (!hit) return false;
+    manifold.bodyA = box;
+    manifold.bodyB = capsule;
+    manifold.normal.negate();
+    return true;
+  }
+
+  public static detectCollision(a: RigidBody3D, b: RigidBody3D, manifold: ContactManifold3D): boolean {
+    if (a.isStatic && b.isStatic) return false;
+    if (a.isSleeping && b.isSleeping) return false;
+
+    if (a.type === 'sphere' && b.type === 'sphere') return CollisionSystem3D.sphereVsSphere(a, b, manifold);
+    if (a.type === 'sphere' && b.type === 'cube') return CollisionSystem3D.sphereVsBox(a, b, manifold);
+    if (a.type === 'cube' && b.type === 'sphere') return CollisionSystem3D.boxVsSphere(a, b, manifold);
+    if (a.type === 'cube' && b.type === 'cube') return CollisionSystem3D.boxVsBox(a, b, manifold);
+    if (a.type === 'capsule' && b.type === 'capsule') return CollisionSystem3D.capsuleVsCapsule(a, b, manifold);
+    if (a.type === 'capsule' && b.type === 'sphere') return CollisionSystem3D.capsuleVsSphere(a, b, manifold);
+    if (a.type === 'sphere' && b.type === 'capsule') return CollisionSystem3D.sphereVsCapsule(a, b, manifold);
+    if (a.type === 'capsule' && b.type === 'cube') return CollisionSystem3D.capsuleVsBox(a, b, manifold);
+    if (a.type === 'cube' && b.type === 'capsule') return CollisionSystem3D.boxVsCapsule(a, b, manifold);
+
+    return false;
+  }
+
+  private static getAxisOverlap(a: RigidBody3D, b: RigidBody3D, axis: Vec3): number {
+    let minA = Number.MAX_VALUE, maxA = -Number.MAX_VALUE;
+    for (let i = 0; i < 8; i++) {
+      const v = a.vertices.at(i) ?? a.position;
+      const proj = v.dot(axis);
+      if (proj < minA) minA = proj;
+      if (proj > maxA) maxA = proj;
+    }
+
+    let minB = Number.MAX_VALUE, maxB = -Number.MAX_VALUE;
+    for (let i = 0; i < 8; i++) {
+      const v = b.vertices.at(i) ?? b.position;
+      const proj = v.dot(axis);
+      if (proj < minB) minB = proj;
+      if (proj > maxB) maxB = proj;
+    }
+
+    if (maxA < minB || maxB < minA) return 0;
+    return Math.min(maxA - minB, maxB - minA);
+  }
+
+  public static resolveVelocity(manifold: ContactManifold3D): void {
     const a = manifold.bodyA;
     const b = manifold.bodyB;
     if (!a || !b) return;
 
     const normal = manifold.normal;
-    const count = manifold.contactCount;
-    if (count === 0) return;
+    const contactCount = manifold.contactCount;
+    if (contactCount === 0) return;
 
-    const posA = a.position;
-    const posB = b.position;
-    const velA = a.velocity;
-    const velB = b.velocity;
-    const angA = a.angularVelocity;
-    const angB = b.angularVelocity;
+    for (let i = 0; i < contactCount; i++) {
+      const contact = manifold.contacts.at(i);
+      if (!contact) continue;
 
-    for (let i = 0; i < count; i++) {
-      const cp = manifold.contacts.at(i);
-      if (!cp) continue;
+      const ra = SCRATCH_RA;
+      ra.set(contact.x - a.position.x, contact.y - a.position.y, contact.z - a.position.z);
+      const rb = SCRATCH_RB;
+      rb.set(contact.x - b.position.x, contact.y - b.position.y, contact.z - b.position.z);
 
-      SCRATCH_RA.set(cp.x - posA.x, cp.y - posA.y, cp.z - posA.z);
-      SCRATCH_RB.set(cp.x - posB.x, cp.y - posB.y, cp.z - posB.z);
+      const va = a.velocity.clone().addInPlace(a.angularVelocity.cross(ra));
+      const vb = b.velocity.clone().addInPlace(b.angularVelocity.cross(rb));
+      const vrel = vb.subInPlace(va);
 
-      // vA_contact = vA + wA x rA
-      const vAx = velA.x + (angA.y * SCRATCH_RA.z - angA.z * SCRATCH_RA.y);
-      const vAy = velA.y + (angA.z * SCRATCH_RA.x - angA.x * SCRATCH_RA.z);
-      const vAz = velA.z + (angA.x * SCRATCH_RA.y - angA.y * SCRATCH_RA.x);
+      const normalVelocity = vrel.dot(normal);
+      if (normalVelocity > 0) continue;
 
-      // vB_contact = vB + wB x rB
-      const vBx = velB.x + (angB.y * SCRATCH_RB.z - angB.z * SCRATCH_RB.y);
-      const vBy = velB.y + (angB.z * SCRATCH_RB.x - angB.x * SCRATCH_RB.z);
-      const vBz = velB.z + (angB.x * SCRATCH_RB.y - angB.y * SCRATCH_RB.x);
+      const raCrossN = ra.cross(normal);
+      const rbCrossN = rb.cross(normal);
 
-      SCRATCH_VREL.set(vBx - vAx, vBy - vAy, vBz - vAz);
-      const contactVel = SCRATCH_VREL.dot(normal);
-      if (contactVel > 0) continue;
+      const iRaN = new Vec3(
+        a.worldInvInertia[0].dot(raCrossN),
+        a.worldInvInertia[1].dot(raCrossN),
+        a.worldInvInertia[2].dot(raCrossN)
+      );
+      const iRbN = new Vec3(
+        b.worldInvInertia[0].dot(rbCrossN),
+        b.worldInvInertia[1].dot(rbCrossN),
+        b.worldInvInertia[2].dot(rbCrossN)
+      );
 
-      // Effective Mass
-      const raCrossN = new Vec3();
-      Vec3.cross(SCRATCH_RA, normal, raCrossN);
-      const rbCrossN = new Vec3();
-      Vec3.cross(SCRATCH_RB, normal, rbCrossN);
+      const angA = iRaN.cross(ra).dot(normal);
+      const angB = iRbN.cross(rb).dot(normal);
+      const invMassSum = a.invMass + b.invMass + angA + angB;
+      if (invMassSum === 0) continue;
 
-      // (ra x n)^T * I_A^-1 * (ra x n)
-      const w0A = a.worldInvInertia.at(0) ?? new Vec3();
-      const w1A = a.worldInvInertia.at(1) ?? new Vec3();
-      const w2A = a.worldInvInertia.at(2) ?? new Vec3();
-      const iaX = w0A.x * raCrossN.x + w0A.y * raCrossN.y + w0A.z * raCrossN.z;
-      const iaY = w1A.x * raCrossN.x + w1A.y * raCrossN.y + w1A.z * raCrossN.z;
-      const iaZ = w2A.x * raCrossN.x + w2A.y * raCrossN.y + w2A.z * raCrossN.z;
-      const rotInertiaA = raCrossN.x * iaX + raCrossN.y * iaY + raCrossN.z * iaZ;
+      const e = manifold.restitution;
+      const j = -(1.0 + e) * normalVelocity / (invMassSum * contactCount);
 
-      const w0B = b.worldInvInertia.at(0) ?? new Vec3();
-      const w1B = b.worldInvInertia.at(1) ?? new Vec3();
-      const w2B = b.worldInvInertia.at(2) ?? new Vec3();
-      const ibX = w0B.x * rbCrossN.x + w0B.y * rbCrossN.y + w0B.z * rbCrossN.z;
-      const ibY = w1B.x * rbCrossN.x + w1B.y * rbCrossN.y + w1B.z * rbCrossN.z;
-      const ibZ = w2B.x * rbCrossN.x + w2B.y * rbCrossN.y + w2B.z * rbCrossN.z;
-      const rotInertiaB = rbCrossN.x * ibX + rbCrossN.y * ibY + rbCrossN.z * ibZ;
-
-      const invMassSum = a.invMass + b.invMass + rotInertiaA + rotInertiaB;
-      if (invMassSum <= 1e-6) continue;
-
-      let jn = 0;
-      if (invMassSum != 0) {
-        jn = -(1.0 + manifold.restitution) * contactVel / (invMassSum * count);
-      }
-
-      SCRATCH_IMPULSE.set(normal.x * jn, normal.y * jn, normal.z * jn);
-      a.applyImpulse(new Vec3(-SCRATCH_IMPULSE.x, -SCRATCH_IMPULSE.y, -SCRATCH_IMPULSE.z), SCRATCH_RA);
-      b.applyImpulse(SCRATCH_IMPULSE, SCRATCH_RB);
-
-      // Friction Impulses along 2 Tangent Vectors
-      if (Math.abs(normal.x) < 0.9) {
-        SCRATCH_T1.set(1, 0, 0);
-      } else {
-        SCRATCH_T1.set(0, 1, 0);
-      }
-      Vec3.cross(normal, SCRATCH_T1, SCRATCH_T2);
-      SCRATCH_T2.normalizeSafe();
-      Vec3.cross(normal, SCRATCH_T2, SCRATCH_T1);
-      SCRATCH_T1.normalizeSafe();
-
-      // Tangent 1 Friction
-      const vt1 = SCRATCH_VREL.dot(SCRATCH_T1);
-      let jt1 = 0;
-      if (invMassSum != 0) {
-        jt1 = -vt1 / (invMassSum * count);
-      }
-      const maxFric = Math.abs(jn) * manifold.friction;
-      jt1 = Math.max(-maxFric, Math.min(maxFric, jt1));
-
-      SCRATCH_IMPULSE.set(SCRATCH_T1.x * jt1, SCRATCH_T1.y * jt1, SCRATCH_T1.z * jt1);
-      a.applyImpulse(new Vec3(-SCRATCH_IMPULSE.x, -SCRATCH_IMPULSE.y, -SCRATCH_IMPULSE.z), SCRATCH_RA);
-      b.applyImpulse(SCRATCH_IMPULSE, SCRATCH_RB);
-
-      // Tangent 2 Friction
-      const vt2 = SCRATCH_VREL.dot(SCRATCH_T2);
-      let jt2 = 0;
-      if (invMassSum != 0) {
-        jt2 = -vt2 / (invMassSum * count);
-      }
-      jt2 = Math.max(-maxFric, Math.min(maxFric, jt2));
-
-      SCRATCH_IMPULSE.set(SCRATCH_T2.x * jt2, SCRATCH_T2.y * jt2, SCRATCH_T2.z * jt2);
-      a.applyImpulse(new Vec3(-SCRATCH_IMPULSE.x, -SCRATCH_IMPULSE.y, -SCRATCH_IMPULSE.z), SCRATCH_RA);
-      b.applyImpulse(SCRATCH_IMPULSE, SCRATCH_RB);
+      const impulse = normal.clone().scale(j);
+      a.applyImpulse(impulse.clone().scale(-1), ra, false);
+      b.applyImpulse(impulse, rb, false);
     }
   }
 
-  public static correctPositions(manifold: ContactManifold3D): void {
+  public static resolvePosition(manifold: ContactManifold3D, beta: number = 0.2, slop: number = 0.05): void {
     const a = manifold.bodyA;
     const b = manifold.bodyB;
     if (!a || !b) return;
 
-    const totalInvMass = a.invMass + b.invMass;
-    if (totalInvMass <= 1e-6) return;
+    const penetration = manifold.penetration;
+    if (penetration <= slop) return;
 
-    const slop = 0.5;
-    const percent = 0.3;
-    const excess = Math.max(0, manifold.penetration - slop);
-    if (excess <= 0) return;
+    const invMassSum = a.invMass + b.invMass;
+    if (invMassSum === 0) return;
 
-    let corrMag = 0;
-    if (totalInvMass != 0) {
-      corrMag = (excess / totalInvMass) * percent;
-    }
+    const correctionMag = (Math.max(0, penetration - slop) / invMassSum) * beta;
+    const cx = manifold.normal.x * correctionMag;
+    const cy = manifold.normal.y * correctionMag;
+    const cz = manifold.normal.z * correctionMag;
 
-    const n = manifold.normal;
     if (!a.isStatic) {
-      a.position.x -= n.x * corrMag * a.invMass;
-      a.position.y -= n.y * corrMag * a.invMass;
-      a.position.z -= n.z * corrMag * a.invMass;
-      a.updateTransform();
+      a.position.x -= cx * a.invMass;
+      a.position.y -= cy * a.invMass;
+      a.position.z -= cz * a.invMass;
     }
     if (!b.isStatic) {
-      b.position.x += n.x * corrMag * b.invMass;
-      b.position.y += n.y * corrMag * b.invMass;
-      b.position.z += n.z * corrMag * b.invMass;
-      b.updateTransform();
+      b.position.x += cx * b.invMass;
+      b.position.y += cy * b.invMass;
+      b.position.z += cz * b.invMass;
     }
   }
 }

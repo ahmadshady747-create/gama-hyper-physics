@@ -1,4 +1,4 @@
-﻿import { Vec2 } from '../math/vec2';
+import { Vec2 } from '../math/vec2';
 import { Vec3 } from '../math/vec3';
 import { Vec4 } from '../math/vec4';
 import {
@@ -134,11 +134,11 @@ export class Renderer {
       if (b.type === 'circle') {
         ctx.beginPath();
         ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
-        ctx.fillStyle = b.isStatic ? 'rgba(71, 85, 105, 0.9)' : b.color;
+        ctx.fillStyle = b.isSleeping ? 'rgba(100, 116, 139, 0.7)' : (b.isStatic ? 'rgba(71, 85, 105, 0.9)' : b.color);
         ctx.fill();
 
         ctx.lineWidth = b.isStatic ? 2 : 2.5;
-        ctx.strokeStyle = b.isStatic ? '#94a3b8' : '#ffffff';
+        ctx.strokeStyle = b.isSleeping ? '#64748b' : (b.isStatic ? '#94a3b8' : '#ffffff');
         ctx.stroke();
 
         ctx.beginPath();
@@ -147,16 +147,29 @@ export class Renderer {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
         ctx.lineWidth = 2;
         ctx.stroke();
+      } else if (b.type === 'capsule') {
+        const r = b.radius;
+        const halfL = (b.length || 40) * 0.5;
+        ctx.beginPath();
+        ctx.arc(0, -halfL, r, Math.PI, 0, false);
+        ctx.arc(0, halfL, r, 0, Math.PI, false);
+        ctx.closePath();
+        ctx.fillStyle = b.isSleeping ? 'rgba(100, 116, 139, 0.7)' : (b.isStatic ? 'rgba(71, 85, 105, 0.9)' : b.color);
+        ctx.fill();
+
+        ctx.lineWidth = b.isStatic ? 2 : 2.5;
+        ctx.strokeStyle = b.isSleeping ? '#64748b' : (b.isStatic ? '#94a3b8' : '#ffffff');
+        ctx.stroke();
       } else {
         const hw = b.halfExtents.x;
         const hh = b.halfExtents.y;
         ctx.beginPath();
         ctx.rect(-hw, -hh, b.width, b.height);
-        ctx.fillStyle = b.isStatic ? 'rgba(71, 85, 105, 0.9)' : b.color;
+        ctx.fillStyle = b.isSleeping ? 'rgba(100, 116, 139, 0.7)' : (b.isStatic ? 'rgba(71, 85, 105, 0.9)' : b.color);
         ctx.fill();
 
         ctx.lineWidth = b.isStatic ? 2 : 2.5;
-        ctx.strokeStyle = b.isStatic ? '#94a3b8' : '#ffffff';
+        ctx.strokeStyle = b.isSleeping ? '#64748b' : (b.isStatic ? '#94a3b8' : '#ffffff');
         ctx.stroke();
 
         ctx.beginPath();
@@ -361,11 +374,14 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Render 3D Spheres
+    // Render 3D Spheres & Capsules
     for (let i = 0; i < count; i++) {
       const b = bodies.at(i);
-      if (b && b.type === 'sphere') {
+      if (!b) continue;
+      if (b.type === 'sphere') {
         this.renderSphere3D(ctx, b);
+      } else if (b.type === 'capsule') {
+        this.renderCapsule3D(ctx, b);
       }
     }
 
@@ -486,6 +502,41 @@ export class Renderer {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+  }
+
+  private renderCapsule3D(ctx: CanvasRenderingContext2D, b: RigidBody3D): void {
+    const p1 = new Vec3(), p2 = new Vec3();
+    const halfL = (b.length || 40) * 0.5;
+    const localAxis = new Vec3(0, halfL, 0);
+    const worldOffset = b.orientation.rotateVec3(localAxis);
+    p1.set(b.position.x - worldOffset.x, b.position.y - worldOffset.y, b.position.z - worldOffset.z);
+    p2.set(b.position.x + worldOffset.x, b.position.y + worldOffset.y, b.position.z + worldOffset.z);
+
+    const s1 = new Vec2(), s2 = new Vec2();
+    const pr1 = this.camera.projectPoint(p1, this.width, this.height, s1);
+    const pr2 = this.camera.projectPoint(p2, this.width, this.height, s2);
+    if (!pr1.visible && !pr2.visible) return;
+
+    const scale1 = Math.max(0.1, 400.0 / (Math.max(1, pr1.depth) + 400.0));
+    const r1 = Math.max(4, b.radius * scale1);
+    const scale2 = Math.max(0.1, 400.0 / (Math.max(1, pr2.depth) + 400.0));
+    const r2 = Math.max(4, b.radius * scale2);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(s1.x, s1.y);
+    ctx.lineTo(s2.x, s2.y);
+    ctx.lineWidth = (r1 + r2);
+    ctx.strokeStyle = b.isSleeping ? 'rgba(100, 116, 139, 0.6)' : b.color;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(s1.x, s1.y, r1, 0, Math.PI * 2);
+    ctx.arc(s2.x, s2.y, r2, 0, Math.PI * 2);
+    ctx.fillStyle = b.isSleeping ? 'rgba(100, 116, 139, 0.8)' : b.color;
+    ctx.fill();
+    ctx.restore();
   }
 
   private renderGroundGrid3D(ctx: CanvasRenderingContext2D, world: PhysicsWorld3D): void {

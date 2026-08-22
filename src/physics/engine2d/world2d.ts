@@ -3,6 +3,10 @@ import { RigidBody2D } from './body2d';
 import { CollisionSystem2D, ContactManifold2D, ManifoldPool2D } from './collision2d';
 import { ParticlePool } from '../particles';
 import { IDimensionalEngine, DimensionMode } from '../common/types';
+import { DynamicBVHTree2D, AABB2D } from '../broadphase/bvh';
+import { IslandSleepingManager, ISleepContact } from '../common/sleeping';
+import { Ray2D, RayHit2D, rayVsCircle2D, rayVsBox2D, rayVsCapsule2D } from '../queries/raycast';
+import { Capsule2D, closestPointSegmentPoint2D } from '../shapes/capsule';
 
 export interface WorldOptions2D {
   gravity?: Vec2;
@@ -16,7 +20,7 @@ const SCRATCH_EXPLOSION_DIR = new Vec2();
 const SCRATCH_EXPLOSION_IMPULSE = new Vec2();
 
 /**
- * PhysicsWorld2D - 2D Physics Simulator implementing IDimensionalEngine.
+ * PhysicsWorld2D - 2D Physics Simulator with Dynamic BVH Tree, Island Sleeping, and Raycasting.
  */
 export class PhysicsWorld2D implements IDimensionalEngine {
   public readonly dimension: DimensionMode = '2d';
@@ -31,6 +35,10 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   public manifoldPool: ManifoldPool2D = new ManifoldPool2D(1024);
   public particlePool: ParticlePool = new ParticlePool(1000);
   public activeManifolds: ContactManifold2D[] = [];
+
+  // Phase 1 Subsystems: BVH Broadphase & Island Sleeping
+  public bvhTree: DynamicBVHTree2D<RigidBody2D> = new DynamicBVHTree2D<RigidBody2D>(256);
+  public sleepingManager: IslandSleepingManager<RigidBody2D> = new IslandSleepingManager<RigidBody2D>();
 
   public fixedDeltaTime: number = 1.0 / 60.0;
   public accumulator: number = 0;
@@ -49,18 +57,31 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   }
 
   public addBody(body: RigidBody2D): RigidBody2D {
-    this.bodies?.push(body);
+    body.updateTransform();
+    body.bvhProxyId = this.bvhTree.createProxy(body.currentAABB, body);
+    this.bodies.push(body);
     return body;
   }
 
   public removeBody(body: RigidBody2D): void {
     const idx = this.bodies.indexOf(body);
     if (idx !== -1) {
-      this.bodies?.splice(idx, 1);
+      if (body.bvhProxyId !== -1) {
+        this.bvhTree.destroyProxy(body.bvhProxyId);
+        body.bvhProxyId = -1;
+      }
+      this.bodies.splice(idx, 1);
     }
   }
 
   public clearBodies(): void {
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
+      if (b.bvhProxyId !== -1) {
+        this.bvhTree.destroyProxy(b.bvhProxyId);
+        b.bvhProxyId = -1;
+      }
+    }
     this.bodies = [];
     this.manifoldPool?.clear();
     this.particlePool?.clear();
@@ -95,7 +116,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   public setGlobalRestitution(val: number): void {
     const len = this.bodies.length;
     for (let i = 0; i < len; i++) {
-      const b = this.bodies.at(i);
+      const b = this.bodies[i];
       if (b) b.restitution = Math.max(0, Math.min(1, val));
     }
   }
@@ -103,17 +124,17 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   public setGlobalFriction(val: number): void {
     const len = this.bodies.length;
     for (let i = 0; i < len; i++) {
-      const b = this.bodies.at(i);
+      const b = this.bodies[i];
       if (b) b.friction = Math.max(0, Math.min(1, val));
     }
   }
 
   public setSolverIterations(iters: number): void {
-    this.solverIterations = Math.max(1, iters);
+    this.solverIterations = Math.max(1, Math.min(30, iters));
   }
 
   public setTimeScale(scale: number): void {
-    this.timeScale = Math.max(0.05, Math.min(3.0, scale));
+    this.timeScale = Math.max(0, Math.min(5, scale));
   }
 
   public setPaused(paused: boolean): void {
@@ -123,7 +144,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   public update(rawDt: number): void {
     if (this.isPaused) return;
 
-    const clampedDt = Math.min(rawDt * this.timeScale, 0.1);
+    const clampedDt = Math.min(0.1, Math.max(0.001, rawDt)) * this.timeScale;
     this.accumulator += clampedDt;
 
     let subSteps = 0;
@@ -133,182 +154,233 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       subSteps++;
     }
 
-    this.particlePool?.update(clampedDt, this.gravity);
+    this.particlePool.update(clampedDt, this.gravity);
   }
 
-  private singleStep(dt: number): void {
-    const bodiesList = this.bodies;
-    const bodyCount = bodiesList.length;
+  public singleStep(dt: number): void {
+    const bodyCount = this.bodies.length;
+    if (bodyCount === 0) return;
 
+    // 1. Integrate Forces (skip sleeping bodies)
     for (let i = 0; i < bodyCount; i++) {
-      const b = bodiesList.at(i);
-      if (b && !b.isStatic) {
-        b.integrateForces(this.gravity, this.windForce, dt);
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping) continue;
+      b.integrateForces(this.gravity, this.windForce, dt);
+    }
+
+    // 2. Integrate Velocities and Update BVH Proxies
+    for (let i = 0; i < bodyCount; i++) {
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping) continue;
+      b.integrateVelocity(dt, this.airResistance, this.angularDamping);
+      this.enforceBoundary(b);
+
+      if (b.bvhProxyId !== -1) {
+        this.bvhTree.moveProxy(b.bvhProxyId, b.currentAABB, b.velocity);
       }
     }
 
-    this.manifoldPool?.clear();
+    // 3. Broadphase Collision via Dynamic BVH Tree
+    this.manifoldPool.clear();
     this.activeManifolds = [];
 
-    for (let i = 0; i < bodyCount; i++) {
-      const bA = bodiesList.at(i);
-      if (!bA) continue;
+    this.bvhTree.generatePairs((a: RigidBody2D, b: RigidBody2D) => {
+      if (a.id === b.id) return;
+      if (a.isStatic && b.isStatic) return;
+      if (a.isSleeping && b.isSleeping) return;
 
-      for (let j = i + 1; j < bodyCount; j++) {
-        const bB = bodiesList.at(j);
-        if (!bB) continue;
+      const manifold = this.manifoldPool.get();
+      const collided = CollisionSystem2D.detectCollision(a, b, manifold);
 
-        if (bA.isStatic && bB.isStatic) continue;
-
-        const minA = bA.aabbMin;
-        const maxA = bA.aabbMax;
-        const minB = bB.aabbMin;
-        const maxB = bB.aabbMax;
-
-        if (maxA.x < minB.x || minA.x > maxB.x || maxA.y < minB.y || minA.y > maxB.y) {
-          continue;
+      if (collided) {
+        if (a.isTrigger || b.isTrigger) {
+          return;
         }
 
-        const manifold = this.manifoldPool.get();
-        let hasCollision = false;
+        this.activeManifolds.push(manifold);
 
-        if (bA.type === 'circle' && bB.type === 'circle') {
-          hasCollision = CollisionSystem2D.circleVsCircle(bA, bB, manifold);
-        } else if (bA.type === 'circle' && bB.type === 'box') {
-          hasCollision = CollisionSystem2D.circleVsBox(bA, bB, manifold);
-        } else if (bA.type === 'box' && bB.type === 'circle') {
-          hasCollision = CollisionSystem2D.circleVsBox(bB, bA, manifold);
-          if (hasCollision) {
-            manifold.normal?.negateInPlace();
-            manifold.bodyA = bA;
-            manifold.bodyB = bB;
-          }
-        } else {
-          hasCollision = CollisionSystem2D.boxVsBox(bA, bB, manifold);
-        }
-
-        if (hasCollision && manifold.penetration > 0) {
-          this.activeManifolds?.push(manifold);
-
-          const relVel = Math.abs(bA.velocity.x - bB.velocity.x) + Math.abs(bA.velocity.y - bB.velocity.y);
-          if (relVel > 250) {
-            const cp = manifold.contacts.at(0) ?? bA.position;
-            this.particlePool?.emitImpactSparks(cp.x, cp.y, manifold.normal, 5, '#f59e0b');
-          }
+        if (manifold.penetration > 2.0) {
+          this.emitCollisionParticles(manifold);
         }
       }
-    }
+    });
 
+    // 4. Island Sleeping System Update
+    const sleepContacts: ISleepContact<RigidBody2D>[] = [];
+    for (let m = 0; m < this.activeManifolds.length; m++) {
+      const c = this.activeManifolds[m];
+      if (c.bodyA && c.bodyB) {
+        sleepContacts.push({ bodyA: c.bodyA, bodyB: c.bodyB });
+      }
+    }
+    this.sleepingManager.update(this.bodies, sleepContacts, dt);
+
+    // 5. Sequential Impulse Solver
     const manifoldCount = this.activeManifolds.length;
-    const iters = this.solverIterations;
-
-    for (let iter = 0; iter < iters; iter++) {
-      for (let mIdx = 0; mIdx < manifoldCount; mIdx++) {
-        const m = this.activeManifolds.at(mIdx);
-        if (m) {
-          CollisionSystem2D.solveVelocity(m);
+    for (let it = 0; it < this.solverIterations; it++) {
+      for (let m = 0; m < manifoldCount; m++) {
+        const manifold = this.activeManifolds[m];
+        if (manifold) {
+          CollisionSystem2D.resolveVelocity(manifold);
         }
       }
     }
 
-    for (let i = 0; i < bodyCount; i++) {
-      const b = bodiesList.at(i);
-      if (b && !b.isStatic) {
-        b.integrateVelocity(dt, this.airResistance, this.angularDamping);
+    // 6. Baumgarte Position Stabilization
+    for (let m = 0; m < manifoldCount; m++) {
+      const manifold = this.activeManifolds[m];
+      if (manifold) {
+        CollisionSystem2D.resolvePosition(manifold, 0.2, 0.05);
       }
     }
-
-    for (let mIdx = 0; mIdx < manifoldCount; mIdx++) {
-      const m = this.activeManifolds.at(mIdx);
-      if (m) {
-        CollisionSystem2D.correctPositions(m);
-      }
-    }
-
-    this.handleBoundaryCollisions();
   }
 
-  private handleBoundaryCollisions(): void {
-    const width = this.bounds.width;
-    const height = this.bounds.height;
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
+  /**
+   * Spatial query returning a body under point pt or null.
+   */
+  public getBodyAt(pt: Vec2): RigidBody2D | null {
+    const qBox = new AABB2D(pt.x - 2, pt.y - 2, pt.x + 2, pt.y + 2);
+    let found: RigidBody2D | null = null;
 
-    for (let i = 0; i < count; i++) {
-      const b = bodiesList.at(i);
-      if (!b || b.isStatic) continue;
-
-      const pos = b.position;
-      const vel = b.velocity;
-      const rest = b.restitution;
-      const fric = b.friction;
-
+    this.bvhTree.queryAABB(qBox, (b: RigidBody2D) => {
       if (b.type === 'circle') {
-        const r = b.radius;
-        if (pos.y + r > height) {
-          pos.y = height - r;
-          if (vel.y > 0) vel.y = -vel.y * rest;
-          vel.x *= (1.0 - fric * 0.1);
-          b.angularVelocity *= (1.0 - fric * 0.2);
-          if (Math.abs(vel.y) < 15) vel.y = 0;
-          b.updateTransform();
-        } else if (pos.y - r < 0) {
-          pos.y = r;
-          if (vel.y < 0) vel.y = -vel.y * rest;
-          b.updateTransform();
+        const dx = pt.x - b.position.x;
+        const dy = pt.y - b.position.y;
+        if (dx * dx + dy * dy <= b.radius * b.radius) {
+          found = b;
+          return false;
         }
-
-        if (pos.x - r < 0) {
-          pos.x = r;
-          if (vel.x < 0) vel.x = -vel.x * rest;
-          vel.y *= (1.0 - fric * 0.1);
-          b.updateTransform();
-        } else if (pos.x + r > width) {
-          pos.x = width - r;
-          if (vel.x > 0) vel.x = -vel.x * rest;
-          vel.y *= (1.0 - fric * 0.1);
-          b.updateTransform();
+      } else if (b.type === 'capsule') {
+        const p1 = new Vec2(), p2 = new Vec2();
+        const cap = b.capsule || new Capsule2D(b.radius, b.length);
+        cap.getSegment(b.position, b.angle, p1, p2);
+        const closest = new Vec2();
+        closestPointSegmentPoint2D(p1, p2, pt, closest);
+        const dx = pt.x - closest.x;
+        const dy = pt.y - closest.y;
+        if (dx * dx + dy * dy <= b.radius * b.radius) {
+          found = b;
+          return false;
         }
       } else {
-        const min = b.aabbMin;
-        const max = b.aabbMax;
-
-        if (max.y > height) {
-          const dy = max.y - height;
-          pos.y -= dy;
-          if (vel.y > 0) vel.y = -vel.y * rest;
-          vel.x *= (1.0 - fric * 0.2);
-          b.angularVelocity *= (1.0 - fric * 0.3);
-          if (Math.abs(vel.y) < 15) vel.y = 0;
-          b.updateTransform();
-        } else if (min.y < 0) {
-          pos.y -= min.y;
-          if (vel.y < 0) vel.y = -vel.y * rest;
-          b.updateTransform();
+        const relX = pt.x - b.position.x;
+        const relY = pt.y - b.position.y;
+        const cos = Math.cos(-b.angle);
+        const sin = Math.sin(-b.angle);
+        const lx = relX * cos - relY * sin;
+        const ly = relX * sin + relY * cos;
+        if (Math.abs(lx) <= b.halfExtents.x && Math.abs(ly) <= b.halfExtents.y) {
+          found = b;
+          return false;
         }
+      }
+      return true;
+    });
 
-        if (min.x < 0) {
-          pos.x -= min.x;
-          if (vel.x < 0) vel.x = -vel.x * rest;
-          vel.y *= (1.0 - fric * 0.1);
-          b.updateTransform();
-        } else if (max.x > width) {
-          pos.x -= (max.x - width);
-          if (vel.x > 0) vel.x = -vel.x * rest;
-          vel.y *= (1.0 - fric * 0.1);
-          b.updateTransform();
-        }
+    return found;
+  }
+
+  /**
+   * Raycast against all 2D bodies using the BVH tree for fast spatial pruning.
+   */
+  public raycast(ray: Ray2D, outHit: RayHit2D): boolean {
+    outHit.reset();
+    let hitFound = false;
+
+    this.bvhTree.queryRay(ray.origin, ray.direction, 1.0, (body: RigidBody2D) => {
+      if ((body.layerMask & ray.layerMask) === 0) return 1.0;
+
+      const localHit = new RayHit2D();
+      localHit.fraction = outHit.fraction;
+
+      let hit = false;
+      if (body.type === 'circle') {
+        hit = rayVsCircle2D(ray, body.position, body.radius, localHit);
+      } else if (body.type === 'box') {
+        hit = rayVsBox2D(ray, body.position, body.width, body.height, body.angle, localHit);
+      } else if (body.type === 'capsule') {
+        const cap = body.capsule || new Capsule2D(body.radius, body.length);
+        hit = rayVsCapsule2D(ray, cap, body.position, body.angle, localHit);
+      }
+
+      if (hit && localHit.fraction < outHit.fraction) {
+        outHit.hit = true;
+        outHit.fraction = localHit.fraction;
+        outHit.distance = localHit.distance;
+        outHit.point.copy(localHit.point);
+        outHit.normal.copy(localHit.normal);
+        outHit.body = body;
+        outHit.isTrigger = body.isTrigger;
+        hitFound = true;
+        return localHit.fraction;
+      }
+      return outHit.fraction;
+    });
+
+    return hitFound;
+  }
+
+  private enforceBoundary(b: RigidBody2D): void {
+    if (b.isStatic) return;
+
+    const w = this.bounds.width;
+    const h = this.bounds.height;
+    const r = b.radius;
+    const e = b.restitution;
+
+    if (b.type === 'circle') {
+      if (b.position.x - r < 0) {
+        b.position.x = r;
+        b.velocity.x = -b.velocity.x * e;
+      } else if (b.position.x + r > w) {
+        b.position.x = w - r;
+        b.velocity.x = -b.velocity.x * e;
+      }
+
+      if (b.position.y - r < 0) {
+        b.position.y = r;
+        b.velocity.y = -b.velocity.y * e;
+      } else if (b.position.y + r > h) {
+        b.position.y = h - r;
+        b.velocity.y = -b.velocity.y * e;
+      }
+    } else {
+      const hx = b.halfExtents.x;
+      const hy = b.halfExtents.y;
+      const maxDim = Math.max(hx, hy);
+
+      if (b.position.x - maxDim < 0) {
+        b.position.x = maxDim;
+        b.velocity.x = -b.velocity.x * e;
+      } else if (b.position.x + maxDim > w) {
+        b.position.x = w - maxDim;
+        b.velocity.x = -b.velocity.x * e;
+      }
+
+      if (b.position.y - maxDim < 0) {
+        b.position.y = maxDim;
+        b.velocity.y = -b.velocity.y * e;
+      } else if (b.position.y + maxDim > h) {
+        b.position.y = h - maxDim;
+        b.velocity.y = -b.velocity.y * e;
       }
     }
   }
 
-  public applyExplosion(origin: { x: number; y: number }, radius: number, maxForce: number = 800): void {
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
-    const radSq = radius * radius;
+  private emitCollisionParticles(manifold: ContactManifold2D): void {
+    const contact = manifold.contacts.at(0);
+    if (!contact) return;
 
-    for (let i = 0; i < count; i++) {
-      const b = bodiesList.at(i);
+    const count = Math.min(6, Math.floor(manifold.penetration * 1.5));
+    this.particlePool.emit(contact.x, contact.y, count, manifold.bodyA?.color || '#38bdf8', 120.0);
+  }
+
+  public applyExplosion(origin: { x: number; y: number }, radius: number, maxForce: number = 80000): void {
+    const rSq = radius * radius;
+    const len = this.bodies.length;
+
+    for (let i = 0; i < len; i++) {
+      const b = this.bodies.at(i);
       if (!b || b.isStatic) continue;
 
       const pos = b.position;
@@ -316,40 +388,21 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       const dy = pos.y - origin.y;
       const distSq = dx * dx + dy * dy;
 
-      if (distSq < radSq && distSq > 1e-6) {
+      if (distSq < rSq && distSq > 1e-4) {
         const dist = Math.sqrt(distSq);
-        SCRATCH_EXPLOSION_DIR?.set(dx, dy)?.normalizeSafe(new Vec2(0, -1));
+        const factor = 1.0 - (dist / radius);
+        const forceMag = maxForce * factor * factor;
 
-        let forceMag = 0;
-        if (radius != 0) {
-          const falloff = 1.0 - dist / radius;
-          forceMag = maxForce * falloff;
-        }
-
-        SCRATCH_EXPLOSION_IMPULSE?.set(
-          SCRATCH_EXPLOSION_DIR.x * forceMag,
-          SCRATCH_EXPLOSION_DIR.y * forceMag
+        SCRATCH_EXPLOSION_DIR.set(dx / dist, dy / dist);
+        SCRATCH_EXPLOSION_IMPULSE.set(
+          SCRATCH_EXPLOSION_DIR.x * forceMag * b.invMass * 0.016,
+          SCRATCH_EXPLOSION_DIR.y * forceMag * b.invMass * 0.016
         );
 
-        b.velocity?.addScaledInPlace(SCRATCH_EXPLOSION_IMPULSE, b.invMass);
-        b.angularVelocity += (Math.random() - 0.5) * 15 * b.invInertia;
+        b.applyImpulse(SCRATCH_EXPLOSION_IMPULSE);
       }
     }
 
-    this.particlePool?.emitExplosion(origin.x, origin.y, 75, 450);
-  }
-
-  public getBodyAt(point: Vec2): RigidBody2D | null {
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
-
-    for (let i = count - 1; i >= 0; i--) {
-      const b = bodiesList.at(i);
-      if (b && b.containsPoint(point)) {
-        return b;
-      }
-    }
-    return null;
+    this.particlePool.emitExplosion(origin.x, origin.y, 40, 350.0);
   }
 }
-

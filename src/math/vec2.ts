@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Vec2 - High-performance 2D Vector mathematics engine.
  * Designed with Zero-GC in-place mutations and Zero-NaN arithmetic guards.
  */
@@ -211,13 +211,21 @@ export class Vec2 {
     return dx * dx + dy * dy;
   }
 
-  public static dist(a: Vec2, b: Vec2): number {
-    return Math.sqrt(Vec2.distSq(a, b));
+  public negate(): this {
+    this.x = -this.x;
+    this.y = -this.y;
+    return this;
   }
 
-  public static lerp(a: Vec2, b: Vec2, t: number, out: Vec2): Vec2 {
-    out.x = a.x + (b.x - a.x) * t;
-    out.y = a.y + (b.y - a.y) * t;
-    return out;
+  public length(): number {
+    return this.mag();
+  }
+
+  public lengthSq(): number {
+    return this.magSq();
+  }
+
+  public normalize(): this {
+    return this.normalizeSafe();
   }
 }

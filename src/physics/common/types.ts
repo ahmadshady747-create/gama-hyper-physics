@@ -1,8 +1,8 @@
-﻿export type DimensionMode = '2d' | '3d' | '4d';
+﻿export type DimensionMode = "2d" | "3d" | "4d";
 
-export type BodyType2D = 'circle' | 'box';
-export type BodyType3D = 'sphere' | 'cube';
-export type BodyType4D = 'hypersphere' | 'tesseract';
+export type BodyType2D = "circle" | "box" | "capsule";
+export type BodyType3D = "sphere" | "cube" | "capsule";
+export type BodyType4D = "hypersphere" | "tesseract";
 export type AnyBodyType = BodyType2D | BodyType3D | BodyType4D;
 
 export interface MaterialProperties {
@@ -17,7 +17,7 @@ export interface SpawnRequest {
   shape: AnyBodyType;
   position: { x: number; y: number; z?: number; w?: number };
   velocity?: { x: number; y: number; z?: number; w?: number };
-  size: { width: number; height: number; depth?: number; hyperDepth?: number; radius?: number };
+  size: { width: number; height: number; depth?: number; hyperDepth?: number; radius?: number; length?: number };
   material: MaterialProperties;
 }
 

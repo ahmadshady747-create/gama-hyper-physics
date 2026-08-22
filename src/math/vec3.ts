@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Vec3 - High-performance 3D Vector mathematics engine.
  * Designed with Zero-GC in-place mutations and Zero-NaN arithmetic guards.
  */
@@ -130,14 +130,38 @@ export class Vec3 {
     return this.x * v.x + this.y * v.y + this.z * v.z;
   }
 
-  public cross(v: Vec3, out: Vec3): Vec3 {
+  public cross(v: Vec3, out?: Vec3): Vec3 {
     const cx = this.y * v.z - this.z * v.y;
     const cy = this.z * v.x - this.x * v.z;
     const cz = this.x * v.y - this.y * v.x;
-    out.x = cx;
-    out.y = cy;
-    out.z = cz;
-    return out;
+    const target = out || new Vec3();
+    target.x = cx;
+    target.y = cy;
+    target.z = cz;
+    return target;
+  }
+
+  public negate(): this {
+    this.x = -this.x;
+    this.y = -this.y;
+    this.z = -this.z;
+    return this;
+  }
+
+  public length(): number {
+    return this.mag();
+  }
+
+  public lengthSq(): number {
+    return this.magSq();
+  }
+
+  public scale(s: number): this {
+    return this.scaleInPlace(s);
+  }
+
+  public normalize(): this {
+    return this.normalizeSafe();
   }
 
   public magSq(): number {

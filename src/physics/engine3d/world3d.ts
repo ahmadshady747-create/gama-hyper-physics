@@ -3,6 +3,10 @@ import { RigidBody3D } from './body3d';
 import { CollisionSystem3D, ContactManifold3D, ManifoldPool3D } from './collision3d';
 import { ParticlePool3D } from '../common/pool';
 import { IDimensionalEngine, DimensionMode } from '../common/types';
+import { DynamicBVHTree3D } from '../broadphase/bvh';
+import { IslandSleepingManager, ISleepContact } from '../common/sleeping';
+import { Ray3D, RayHit3D, rayVsSphere3D, rayVsBox3D, rayVsCapsule3D } from '../queries/raycast';
+import { Capsule3D } from '../shapes/capsule';
 
 export interface WorldOptions3D {
   gravity?: Vec3;
@@ -17,7 +21,7 @@ const SCRATCH_EXPLOSION_DIR = new Vec3();
 const SCRATCH_EXPLOSION_IMPULSE = new Vec3();
 
 /**
- * PhysicsWorld3D - 3D Physics Simulator with 3D Bounds Enclosure.
+ * PhysicsWorld3D - 3D Physics Simulator with Dynamic BVH Tree, Island Sleeping, and Raycasting.
  */
 export class PhysicsWorld3D implements IDimensionalEngine {
   public readonly dimension: DimensionMode = '3d';
@@ -32,6 +36,10 @@ export class PhysicsWorld3D implements IDimensionalEngine {
   public manifoldPool: ManifoldPool3D = new ManifoldPool3D(1024);
   public particlePool: ParticlePool3D = new ParticlePool3D(1000);
   public activeManifolds: ContactManifold3D[] = [];
+
+  // Phase 1 Subsystems: BVH Broadphase & Island Sleeping
+  public bvhTree: DynamicBVHTree3D<RigidBody3D> = new DynamicBVHTree3D<RigidBody3D>(256);
+  public sleepingManager: IslandSleepingManager<RigidBody3D> = new IslandSleepingManager<RigidBody3D>();
 
   public fixedDeltaTime: number = 1.0 / 60.0;
   public accumulator: number = 0;
@@ -51,18 +59,31 @@ export class PhysicsWorld3D implements IDimensionalEngine {
   }
 
   public addBody(body: RigidBody3D): RigidBody3D {
-    this.bodies?.push(body);
+    body.updateTransform();
+    body.bvhProxyId = this.bvhTree.createProxy(body.currentAABB, body);
+    this.bodies.push(body);
     return body;
   }
 
   public removeBody(body: RigidBody3D): void {
     const idx = this.bodies.indexOf(body);
     if (idx !== -1) {
-      this.bodies?.splice(idx, 1);
+      if (body.bvhProxyId !== -1) {
+        this.bvhTree.destroyProxy(body.bvhProxyId);
+        body.bvhProxyId = -1;
+      }
+      this.bodies.splice(idx, 1);
     }
   }
 
   public clearBodies(): void {
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
+      if (b.bvhProxyId !== -1) {
+        this.bvhTree.destroyProxy(b.bvhProxyId);
+        b.bvhProxyId = -1;
+      }
+    }
     this.bodies = [];
     this.manifoldPool?.clear();
     this.particlePool?.clear();
@@ -87,18 +108,18 @@ export class PhysicsWorld3D implements IDimensionalEngine {
     return this.particlePool.activeCount;
   }
 
-  public setGravity(x: number, y: number, z: number = 0): void {
-    this.gravity?.set(x, y, z);
+  public setGravity(x: number, y: number, z?: number): void {
+    this.gravity?.set(x, y, z ?? 0);
   }
 
-  public setWind(x: number, y: number, z: number = 0): void {
-    this.windForce?.set(x, y, z);
+  public setWind(x: number, y: number, z?: number): void {
+    this.windForce?.set(x, y, z ?? 0);
   }
 
   public setGlobalRestitution(val: number): void {
     const len = this.bodies.length;
     for (let i = 0; i < len; i++) {
-      const b = this.bodies.at(i);
+      const b = this.bodies[i];
       if (b) b.restitution = Math.max(0, Math.min(1, val));
     }
   }
@@ -106,17 +127,17 @@ export class PhysicsWorld3D implements IDimensionalEngine {
   public setGlobalFriction(val: number): void {
     const len = this.bodies.length;
     for (let i = 0; i < len; i++) {
-      const b = this.bodies.at(i);
+      const b = this.bodies[i];
       if (b) b.friction = Math.max(0, Math.min(1, val));
     }
   }
 
   public setSolverIterations(iters: number): void {
-    this.solverIterations = Math.max(1, iters);
+    this.solverIterations = Math.max(1, Math.min(30, iters));
   }
 
   public setTimeScale(scale: number): void {
-    this.timeScale = Math.max(0.05, Math.min(3.0, scale));
+    this.timeScale = Math.max(0, Math.min(5, scale));
   }
 
   public setPaused(paused: boolean): void {
@@ -126,7 +147,7 @@ export class PhysicsWorld3D implements IDimensionalEngine {
   public update(rawDt: number): void {
     if (this.isPaused) return;
 
-    const clampedDt = Math.min(rawDt * this.timeScale, 0.1);
+    const clampedDt = Math.min(0.1, Math.max(0.001, rawDt)) * this.timeScale;
     this.accumulator += clampedDt;
 
     let subSteps = 0;
@@ -136,274 +157,232 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       subSteps++;
     }
 
-    this.particlePool?.update(clampedDt, this.gravity);
+    this.particlePool.update(clampedDt, this.gravity);
   }
 
-  private singleStep(dt: number): void {
-    const bodiesList = this.bodies;
-    const bodyCount = bodiesList.length;
+  public singleStep(dt: number): void {
+    const bodyCount = this.bodies.length;
+    if (bodyCount === 0) return;
 
+    // 1. Integrate Forces (skip sleeping bodies)
     for (let i = 0; i < bodyCount; i++) {
-      const b = bodiesList.at(i);
-      if (b && !b.isStatic) {
-        b.integrateForces(this.gravity, this.windForce, dt);
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping) continue;
+      b.integrateForces(this.gravity, this.windForce, dt);
+    }
+
+    // 2. Integrate Velocities and Update BVH Proxies
+    for (let i = 0; i < bodyCount; i++) {
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping) continue;
+      b.integrateVelocity(dt, this.airResistance, this.angularDamping);
+      this.enforceBoundary(b);
+
+      if (b.bvhProxyId !== -1) {
+        this.bvhTree.moveProxy(b.bvhProxyId, b.currentAABB, b.velocity);
       }
     }
 
-    this.manifoldPool?.clear();
+    // 3. Broadphase Collision via Dynamic BVH Tree
+    this.manifoldPool.clear();
     this.activeManifolds = [];
 
-    for (let i = 0; i < bodyCount; i++) {
-      const bA = bodiesList.at(i);
-      if (!bA) continue;
+    this.bvhTree.generatePairs((a: RigidBody3D, b: RigidBody3D) => {
+      if (a.id === b.id) return;
+      if (a.isStatic && b.isStatic) return;
+      if (a.isSleeping && b.isSleeping) return;
 
-      for (let j = i + 1; j < bodyCount; j++) {
-        const bB = bodiesList.at(j);
-        if (!bB) continue;
+      const manifold = this.manifoldPool.get();
+      const collided = CollisionSystem3D.detectCollision(a, b, manifold);
 
-        if (bA.isStatic && bB.isStatic) continue;
-
-        // 3D AABB Overlap
-        const minA = bA.aabbMin, maxA = bA.aabbMax;
-        const minB = bB.aabbMin, maxB = bB.aabbMax;
-
-        if (
-          maxA.x < minB.x || minA.x > maxB.x ||
-          maxA.y < minB.y || minA.y > maxB.y ||
-          maxA.z < minB.z || minA.z > maxB.z
-        ) {
-          continue;
+      if (collided) {
+        if (a.isTrigger || b.isTrigger) {
+          return;
         }
 
-        const manifold = this.manifoldPool.get();
-        let hasCollision = false;
+        this.activeManifolds.push(manifold);
 
-        if (bA.type === 'sphere' && bB.type === 'sphere') {
-          hasCollision = CollisionSystem3D.sphereVsSphere(bA, bB, manifold);
-        } else if (bA.type === 'sphere' && bB.type === 'cube') {
-          hasCollision = CollisionSystem3D.sphereVsBox(bA, bB, manifold);
-        } else if (bA.type === 'cube' && bB.type === 'sphere') {
-          hasCollision = CollisionSystem3D.sphereVsBox(bB, bA, manifold);
-          if (hasCollision) {
-            manifold.normal.negateInPlace();
-            manifold.bodyA = bA;
-            manifold.bodyB = bB;
-          }
-        } else {
-          hasCollision = CollisionSystem3D.boxVsBox(bA, bB, manifold);
-        }
-
-        if (hasCollision && manifold.penetration > 0) {
-          this.activeManifolds?.push(manifold);
-
-          const relVel =
-            Math.abs(bA.velocity.x - bB.velocity.x) +
-            Math.abs(bA.velocity.y - bB.velocity.y) +
-            Math.abs(bA.velocity.z - bB.velocity.z);
-
-          if (relVel > 250) {
-            const cp = manifold.contacts.at(0) ?? bA.position;
-            this.particlePool?.emitImpactSparks(cp, manifold.normal, 5, '#f59e0b');
-          }
+        if (manifold.penetration > 2.0) {
+          this.emitCollisionParticles(manifold);
         }
       }
-    }
+    });
 
+    // 4. Island Sleeping System Update
+    const sleepContacts: ISleepContact<RigidBody3D>[] = [];
+    for (let m = 0; m < this.activeManifolds.length; m++) {
+      const c = this.activeManifolds[m];
+      if (c.bodyA && c.bodyB) {
+        sleepContacts.push({ bodyA: c.bodyA, bodyB: c.bodyB });
+      }
+    }
+    this.sleepingManager.update(this.bodies, sleepContacts, dt);
+
+    // 5. Sequential Impulse Solver
     const manifoldCount = this.activeManifolds.length;
-    const iters = this.solverIterations;
-
-    for (let iter = 0; iter < iters; iter++) {
-      for (let mIdx = 0; mIdx < manifoldCount; mIdx++) {
-        const m = this.activeManifolds.at(mIdx);
-        if (m) {
-          CollisionSystem3D.solveVelocity(m);
+    for (let it = 0; it < this.solverIterations; it++) {
+      for (let m = 0; m < manifoldCount; m++) {
+        const manifold = this.activeManifolds[m];
+        if (manifold) {
+          CollisionSystem3D.resolveVelocity(manifold);
         }
       }
     }
 
-    for (let i = 0; i < bodyCount; i++) {
-      const b = bodiesList.at(i);
-      if (b && !b.isStatic) {
-        b.integrateVelocity(dt, this.airResistance, this.angularDamping);
-      }
-    }
-
-    for (let mIdx = 0; mIdx < manifoldCount; mIdx++) {
-      const m = this.activeManifolds.at(mIdx);
-      if (m) {
-        CollisionSystem3D.correctPositions(m);
-      }
-    }
-
-    this.handleBoundaryCollisions();
-  }
-
-  private handleBoundaryCollisions(): void {
-    const halfW = this.bounds.width * 0.5;
-    const halfD = this.bounds.depth * 0.5;
-    const height = this.bounds.height;
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
-
-    for (let i = 0; i < count; i++) {
-      const b = bodiesList.at(i);
-      if (!b || b.isStatic) continue;
-
-      const pos = b.position;
-      const vel = b.velocity;
-      const rest = b.restitution;
-      const fric = b.friction;
-
-      if (b.type === 'sphere') {
-        const r = b.radius;
-        // Floor (y = 0)
-        if (pos.y - r < 0) {
-          pos.y = r;
-          if (vel.y < 0) vel.y = -vel.y * rest;
-          vel.x *= (1.0 - fric * 0.1);
-          vel.z *= (1.0 - fric * 0.1);
-          if (Math.abs(vel.y) < 15) vel.y = 0;
-          b.updateTransform();
-        }
-        // Ceiling
-        else if (pos.y + r > height) {
-          pos.y = height - r;
-          if (vel.y > 0) vel.y = -vel.y * rest;
-          b.updateTransform();
-        }
-
-        // Left / Right Walls (-halfW, +halfW)
-        if (pos.x - r < -halfW) {
-          pos.x = -halfW + r;
-          if (vel.x < 0) vel.x = -vel.x * rest;
-          b.updateTransform();
-        } else if (pos.x + r > halfW) {
-          pos.x = halfW - r;
-          if (vel.x > 0) vel.x = -vel.x * rest;
-          b.updateTransform();
-        }
-
-        // Front / Back Walls (-halfD, +halfD)
-        if (pos.z - r < -halfD) {
-          pos.z = -halfD + r;
-          if (vel.z < 0) vel.z = -vel.z * rest;
-          b.updateTransform();
-        } else if (pos.z + r > halfD) {
-          pos.z = halfD - r;
-          if (vel.z > 0) vel.z = -vel.z * rest;
-          b.updateTransform();
-        }
-      } else {
-        const min = b.aabbMin;
-        const max = b.aabbMax;
-
-        // Floor
-        if (min.y < 0) {
-          pos.y -= min.y;
-          if (vel.y < 0) vel.y = -vel.y * rest;
-          vel.x *= (1.0 - fric * 0.1);
-          vel.z *= (1.0 - fric * 0.1);
-          if (Math.abs(vel.y) < 15) vel.y = 0;
-          b.updateTransform();
-        } else if (max.y > height) {
-          pos.y -= (max.y - height);
-          if (vel.y > 0) vel.y = -vel.y * rest;
-          b.updateTransform();
-        }
-
-        // X Walls
-        if (min.x < -halfW) {
-          pos.x -= (min.x - -halfW);
-          if (vel.x < 0) vel.x = -vel.x * rest;
-          b.updateTransform();
-        } else if (max.x > halfW) {
-          pos.x -= (max.x - halfW);
-          if (vel.x > 0) vel.x = -vel.x * rest;
-          b.updateTransform();
-        }
-
-        // Z Walls
-        if (min.z < -halfD) {
-          pos.z -= (min.z - -halfD);
-          if (vel.z < 0) vel.z = -vel.z * rest;
-          b.updateTransform();
-        } else if (max.z > halfD) {
-          pos.z -= (max.z - halfD);
-          if (vel.z > 0) vel.z = -vel.z * rest;
-          b.updateTransform();
-        }
+    // 6. Position Stabilization
+    for (let m = 0; m < manifoldCount; m++) {
+      const manifold = this.activeManifolds[m];
+      if (manifold) {
+        CollisionSystem3D.resolvePosition(manifold, 0.2, 0.05);
       }
     }
   }
 
-  public applyExplosion(origin: { x: number; y: number; z?: number }, radius: number, maxForce: number = 900): void {
-    const origZ = origin.z ?? 0;
-    const origPos = new Vec3(origin.x, origin.y, origZ);
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
-    const radSq = radius * radius;
+  /**
+   * Raycast against all 3D bodies using the BVH tree.
+   */
+  public raycast(ray: Ray3D, outHit: RayHit3D): boolean {
+    outHit.reset();
+    let hitFound = false;
 
-    for (let i = 0; i < count; i++) {
-      const b = bodiesList.at(i);
+    this.bvhTree.queryRay(ray.origin, ray.direction, 1.0, (body: RigidBody3D) => {
+      if ((body.layerMask & ray.layerMask) === 0) return 1.0;
+
+      const localHit = new RayHit3D();
+      localHit.fraction = outHit.fraction;
+
+      let hit = false;
+      if (body.type === 'sphere') {
+        hit = rayVsSphere3D(ray, body.position, body.radius, localHit);
+      } else if (body.type === 'cube') {
+        hit = rayVsBox3D(ray, body.position, body.halfExtents, body.orientation, localHit);
+      } else if (body.type === 'capsule') {
+        const cap = body.capsule || new Capsule3D(body.radius, body.length);
+        hit = rayVsCapsule3D(ray, cap, body.position, body.orientation, localHit);
+      }
+
+      if (hit && localHit.fraction < outHit.fraction) {
+        outHit.hit = true;
+        outHit.fraction = localHit.fraction;
+        outHit.distance = localHit.distance;
+        outHit.point.copy(localHit.point);
+        outHit.normal.copy(localHit.normal);
+        outHit.body = body;
+        outHit.isTrigger = body.isTrigger;
+        hitFound = true;
+        return localHit.fraction;
+      }
+      return outHit.fraction;
+    });
+
+    return hitFound;
+  }
+
+  private enforceBoundary(b: RigidBody3D): void {
+    if (b.isStatic) return;
+
+    const hw = this.bounds.width * 0.5;
+    const hd = this.bounds.depth * 0.5;
+    const r = b.radius;
+    const e = b.restitution;
+
+    if (b.type === 'sphere') {
+      if (b.position.x - r < -hw) {
+        b.position.x = -hw + r;
+        b.velocity.x = -b.velocity.x * e;
+      } else if (b.position.x + r > hw) {
+        b.position.x = hw - r;
+        b.velocity.x = -b.velocity.x * e;
+      }
+
+      if (b.position.y - r < 0) {
+        b.position.y = r;
+        b.velocity.y = -b.velocity.y * e;
+      } else if (b.position.y + r > this.bounds.height) {
+        b.position.y = this.bounds.height - r;
+        b.velocity.y = -b.velocity.y * e;
+      }
+
+      if (b.position.z - r < -hd) {
+        b.position.z = -hd + r;
+        b.velocity.z = -b.velocity.z * e;
+      } else if (b.position.z + r > hd) {
+        b.position.z = hd - r;
+        b.velocity.z = -b.velocity.z * e;
+      }
+    } else {
+      const maxDim = Math.max(b.halfExtents.x, b.halfExtents.y, b.halfExtents.z);
+
+      if (b.position.x - maxDim < -hw) {
+        b.position.x = -hw + maxDim;
+        b.velocity.x = -b.velocity.x * e;
+      } else if (b.position.x + maxDim > hw) {
+        b.position.x = hw - maxDim;
+        b.velocity.x = -b.velocity.x * e;
+      }
+
+      if (b.position.y - maxDim < 0) {
+        b.position.y = maxDim;
+        b.velocity.y = -b.velocity.y * e;
+      } else if (b.position.y + maxDim > this.bounds.height) {
+        b.position.y = this.bounds.height - maxDim;
+        b.velocity.y = -b.velocity.y * e;
+      }
+
+      if (b.position.z - maxDim < -hd) {
+        b.position.z = -hd + maxDim;
+        b.velocity.z = -b.velocity.z * e;
+      } else if (b.position.z + maxDim > hd) {
+        b.position.z = hd - maxDim;
+        b.velocity.z = -b.velocity.z * e;
+      }
+    }
+  }
+
+  private emitCollisionParticles(manifold: ContactManifold3D): void {
+    const contact = manifold.contacts.at(0);
+    if (!contact) return;
+
+    const count = Math.min(6, Math.floor(manifold.penetration * 1.5));
+    this.particlePool.emit(
+      contact,
+      count,
+      manifold.bodyA?.color || '#38bdf8',
+      120.0
+    );
+  }
+
+  public applyExplosion(origin: { x: number; y: number; z?: number }, radius: number, maxForce: number = 80000): void {
+    const origZ = origin.z || 0;
+    const rSq = radius * radius;
+    const len = this.bodies.length;
+
+    for (let i = 0; i < len; i++) {
+      const b = this.bodies.at(i);
       if (!b || b.isStatic) continue;
 
       const pos = b.position;
-      const dx = pos.x - origPos.x;
-      const dy = pos.y - origPos.y;
-      const dz = pos.z - origPos.z;
+      const dx = pos.x - origin.x;
+      const dy = pos.y - origin.y;
+      const dz = pos.z - origZ;
       const distSq = dx * dx + dy * dy + dz * dz;
 
-      if (distSq < radSq && distSq > 1e-6) {
+      if (distSq < rSq && distSq > 1e-4) {
         const dist = Math.sqrt(distSq);
-        SCRATCH_EXPLOSION_DIR.set(dx, dy, dz).normalizeSafe(new Vec3(0, 1, 0));
+        const factor = 1.0 - (dist / radius);
+        const forceMag = maxForce * factor * factor;
 
-        let forceMag = 0;
-        if (radius != 0) {
-          const falloff = 1.0 - dist / radius;
-          forceMag = maxForce * falloff;
-        }
-
+        SCRATCH_EXPLOSION_DIR.set(dx / dist, dy / dist, dz / dist);
         SCRATCH_EXPLOSION_IMPULSE.set(
-          SCRATCH_EXPLOSION_DIR.x * forceMag,
-          SCRATCH_EXPLOSION_DIR.y * forceMag,
-          SCRATCH_EXPLOSION_DIR.z * forceMag
+          SCRATCH_EXPLOSION_DIR.x * forceMag * b.invMass * 0.016,
+          SCRATCH_EXPLOSION_DIR.y * forceMag * b.invMass * 0.016,
+          SCRATCH_EXPLOSION_DIR.z * forceMag * b.invMass * 0.016
         );
 
-        b.velocity?.addScaledInPlace(SCRATCH_EXPLOSION_IMPULSE, b.invMass);
-        b.angularVelocity?.set(
-          b.angularVelocity.x + (Math.random() - 0.5) * 10 * b.invMass,
-          b.angularVelocity.y + (Math.random() - 0.5) * 10 * b.invMass,
-          b.angularVelocity.z + (Math.random() - 0.5) * 10 * b.invMass
-        );
+        b.applyImpulse(SCRATCH_EXPLOSION_IMPULSE);
       }
     }
 
-    this.particlePool?.emitExplosion(origPos, 75, 450);
-  }
-
-  public getBodyAtRay(rayOrigin: Vec3, rayDir: Vec3): RigidBody3D | null {
-    let closestDist = Number.MAX_VALUE;
-    let closestBody: RigidBody3D | null = null;
-    const bodiesList = this.bodies;
-    const count = bodiesList.length;
-
-    for (let i = 0; i < count; i++) {
-      const b = bodiesList.at(i);
-      if (!b) continue;
-
-      // Sphere test
-      const toBody = new Vec3(b.position.x - rayOrigin.x, b.position.y - rayOrigin.y, b.position.z - rayOrigin.z);
-      const proj = toBody.dot(rayDir);
-      if (proj > 0) {
-        const perpSq = toBody.magSq() - proj * proj;
-        const rad = b.radius || (Math.max(b.width, b.height, b.depth) * 0.5);
-        if (perpSq <= rad * rad && proj < closestDist) {
-          closestDist = proj;
-          closestBody = b;
-        }
-      }
-    }
-    return closestBody;
+    this.particlePool.emitExplosion(new Vec3(origin.x, origin.y, origZ), 40, 350.0);
   }
 }
-

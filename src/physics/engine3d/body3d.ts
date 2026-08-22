@@ -1,6 +1,9 @@
-﻿import { Vec3 } from '../../math/vec3';
+import { Vec3 } from '../../math/vec3';
 import { Quat } from '../../math/quat';
 import { BodyType3D } from '../common/types';
+import { Capsule3D } from '../shapes/capsule';
+import { AABB3D } from '../broadphase/bvh';
+import { ISleepableBody } from '../common/sleeping';
 
 export interface BodyOptions3D {
   type?: BodyType3D;
@@ -13,19 +16,23 @@ export interface BodyOptions3D {
   width?: number;
   height?: number;
   depth?: number;
+  length?: number;
   restitution?: number;
   friction?: number;
   isStatic?: boolean;
   color?: string;
+  isTrigger?: boolean;
+  layerMask?: number;
+  canSleep?: boolean;
 }
 
 let nextBodyId3D = 1;
 
 /**
  * RigidBody3D - 3D Physical Rigid Body with In-Place Kinematics, Quaternion Orientations,
- * and 3x3 Rotated Inertia Tensors.
+ * Dynamic BVH Proxies, Sleeping, and Capsule Colliders.
  */
-export class RigidBody3D {
+export class RigidBody3D implements ISleepableBody {
   public id: number;
   public type: BodyType3D;
 
@@ -55,13 +62,26 @@ export class RigidBody3D {
   public width: number;
   public height: number;
   public depth: number;
+  public length: number;
   public halfExtents: Vec3;
+  public capsule?: Capsule3D;
 
   // Pre-allocated Box Geometry Buffers (8 vertices & 3 principal normal axes)
   public vertices: [Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3, Vec3];
   public axes: [Vec3, Vec3, Vec3];
-  public aabbMin: Vec3;
-  public aabbMax: Vec3;
+  public aabbMin: Vec3 = new Vec3();
+  public aabbMax: Vec3 = new Vec3();
+  public currentAABB: AABB3D = new AABB3D();
+
+  // Spatial & Sleeping Systems
+  public bvhProxyId: number = -1;
+  public isSleeping: boolean = false;
+  public canSleep: boolean = true;
+  public sleepTimer: number = 0;
+
+  // Triggers & Layers
+  public isTrigger: boolean = false;
+  public layerMask: number = 0xFFFFFFFF;
 
   // Visual Customization
   public color: string;
@@ -82,30 +102,37 @@ export class RigidBody3D {
     this.width = options?.width || 40;
     this.height = options?.height || 40;
     this.depth = options?.depth || 40;
+    this.length = options?.length || 40;
     this.halfExtents = new Vec3(this.width * 0.5, this.height * 0.5, this.depth * 0.5);
 
-    this.restitution = typeof options?.restitution === 'number' ? Math.max(0, Math.min(1, options.restitution)) : 0.4;
+    if (this.type === 'capsule') {
+      this.capsule = new Capsule3D(this.radius, this.length);
+    }
+
+    this.restitution = typeof options?.restitution === 'number' ? Math.max(0, Math.min(1, options.restitution)) : 0.3;
     this.friction = typeof options?.friction === 'number' ? Math.max(0, Math.min(1, options.friction)) : 0.3;
     this.isStatic = Boolean(options?.isStatic);
+    this.isTrigger = Boolean(options?.isTrigger);
+    this.layerMask = options?.layerMask ?? 0xFFFFFFFF;
+    this.canSleep = options?.canSleep !== undefined ? options.canSleep : true;
 
     this.color = options?.color || '#38bdf8';
 
-    // 8 Box Vertices
+    // Pre-allocate 8 vertices and 3 axes for SAT
     this.vertices = [
       new Vec3(), new Vec3(), new Vec3(), new Vec3(),
       new Vec3(), new Vec3(), new Vec3(), new Vec3()
     ];
     this.axes = [new Vec3(1, 0, 0), new Vec3(0, 1, 0), new Vec3(0, 0, 1)];
-    this.aabbMin = new Vec3();
-    this.aabbMax = new Vec3();
 
     this.mass = 1.0;
     this.invMass = 1.0;
 
-    const initialMass = options?.mass || (this.type === 'sphere'
-      ? (4.0 / 3.0) * Math.PI * this.radius * this.radius * this.radius * 0.0001
-      : this.width * this.height * this.depth * 0.0001);
-
+    const initialMass = options?.mass || (
+      this.type === 'sphere' ? (4.0 / 3.0) * Math.PI * Math.pow(this.radius, 3) * 0.0001 :
+      this.type === 'capsule' ? (Math.PI * this.radius * this.radius * this.length + (4.0 / 3.0) * Math.PI * Math.pow(this.radius, 3)) * 0.0001 :
+      this.width * this.height * this.depth * 0.0001
+    );
     this.setMass(initialMass);
 
     if (this.isStatic) {
@@ -119,10 +146,12 @@ export class RigidBody3D {
     this.isStatic = isStatic;
     if (isStatic) {
       this.invMass = 0;
-      this.localInvInertia?.set(0, 0, 0);
-      this.velocity?.set(0, 0, 0);
-      this.angularVelocity?.set(0, 0, 0);
-      this.updateInertiaTensor();
+      this.localInvInertia.set(0, 0, 0);
+      this.worldInvInertia[0].set(0, 0, 0);
+      this.worldInvInertia[1].set(0, 0, 0);
+      this.worldInvInertia[2].set(0, 0, 0);
+      this.velocity.set(0, 0, 0);
+      this.angularVelocity.set(0, 0, 0);
     } else {
       this.setMass(this.mass > 0 ? this.mass : 1.0);
     }
@@ -133,236 +162,246 @@ export class RigidBody3D {
 
     if (this.isStatic) {
       this.invMass = 0;
-      this.localInvInertia?.set(0, 0, 0);
-      this.updateInertiaTensor();
+      this.localInvInertia.set(0, 0, 0);
       return;
     }
 
-    if (this.mass != 0) {
-      this.invMass = 1.0 / this.mass;
-    } else {
-      this.invMass = 0;
-    }
+    this.invMass = 1.0 / this.mass;
 
     if (this.type === 'sphere') {
-      // Inertia for Solid Sphere: I = 2/5 * m * r^2
       const iVal = 0.4 * this.mass * this.radius * this.radius;
-      if (iVal > 1e-6 && iVal != 0) {
-        this.localInvInertia?.set(1.0 / iVal, 1.0 / iVal, 1.0 / iVal);
-      } else {
-        this.localInvInertia?.set(0, 0, 0);
-      }
+      const invI = iVal > 0 ? 1.0 / iVal : 0;
+      this.localInvInertia.set(invI, invI, invI);
+    } else if (this.type === 'capsule') {
+      const iXZ = this.mass * (0.25 * this.radius * this.radius + (1.0 / 12.0) * this.length * this.length);
+      const iY = 0.5 * this.mass * this.radius * this.radius;
+      this.localInvInertia.set(iXZ > 0 ? 1.0 / iXZ : 0, iY > 0 ? 1.0 / iY : 0, iXZ > 0 ? 1.0 / iXZ : 0);
     } else {
-      // Inertia for Solid Cuboid: I_x = 1/12 * m * (h^2 + d^2), I_y = 1/12 * m * (w^2 + d^2), I_z = 1/12 * m * (w^2 + h^2)
       const w2 = this.width * this.width;
       const h2 = this.height * this.height;
       const d2 = this.depth * this.depth;
-      const factor = (1.0 / 12.0) * this.mass;
-
-      const ix = factor * (h2 + d2);
-      const iy = factor * (w2 + d2);
-      const iz = factor * (w2 + h2);
-
-      const invX = (ix > 1e-6 && ix != 0) ? (1.0 / ix) : 0;
-      const invY = (iy > 1e-6 && iy != 0) ? (1.0 / iy) : 0;
-      const invZ = (iz > 1e-6 && iz != 0) ? (1.0 / iz) : 0;
-
-      this.localInvInertia?.set(invX, invY, invZ);
+      const ix = (1.0 / 12.0) * this.mass * (h2 + d2);
+      const iy = (1.0 / 12.0) * this.mass * (w2 + d2);
+      const iz = (1.0 / 12.0) * this.mass * (w2 + h2);
+      this.localInvInertia.set(
+        ix > 0 ? 1.0 / ix : 0,
+        iy > 0 ? 1.0 / iy : 0,
+        iz > 0 ? 1.0 / iz : 0
+      );
     }
 
     this.updateInertiaTensor();
   }
 
-  /**
-   * Updates World Inverse Inertia Tensor via Rotation Matrix R * I_local^-1 * R^T (Zero-GC).
-   */
-  public updateInertiaTensor(): void {
-    if (this.isStatic) {
-      this.worldInvInertia.at(0)?.set(0, 0, 0);
-      this.worldInvInertia.at(1)?.set(0, 0, 0);
-      this.worldInvInertia.at(2)?.set(0, 0, 0);
-      return;
-    }
+  public getKineticEnergy(): number {
+    const vSq = this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y + this.velocity.z * this.velocity.z;
+    const wSq = this.angularVelocity.x * this.angularVelocity.x + this.angularVelocity.y * this.angularVelocity.y + this.angularVelocity.z * this.angularVelocity.z;
+    return 0.5 * this.mass * vSq + 0.5 * wSq;
+  }
 
-    const q = this.orientation;
-    const x = q.x, y = q.y, z = q.z, w = q.w;
-    const x2 = x + x, y2 = y + y, z2 = z + z;
-    const xx = x * x2, xy = x * y2, xz = x * z2;
-    const yy = y * y2, yz = y * z2, zz = z * z2;
-    const wx = w * x2, wy = w * y2, wz = w * z2;
+  public wakeUp(): void {
+    this.isSleeping = false;
+    this.sleepTimer = 0;
+  }
 
-    // Rotation Matrix Columns
-    const r00 = 1 - (yy + zz), r01 = xy - wz,        r02 = xz + wy;
-    const r10 = xy + wz,        r11 = 1 - (xx + zz), r12 = yz - wx;
-    const r20 = xz - wy,        r21 = yz + wx,        r22 = 1 - (xx + yy);
-
-    const l = this.localInvInertia;
-    const lx = l.x, ly = l.y, lz = l.z;
-
-    // M = R * diag(lx, ly, lz)
-    const m00 = r00 * lx, m01 = r01 * ly, m02 = r02 * lz;
-    const m10 = r10 * lx, m11 = r11 * ly, m12 = r12 * lz;
-    const m20 = r20 * lx, m21 = r21 * ly, m22 = r22 * lz;
-
-    // Result = M * R^T
-    const w0 = this.worldInvInertia.at(0);
-    const w1 = this.worldInvInertia.at(1);
-    const w2 = this.worldInvInertia.at(2);
-
-    w0?.set(
-      m00 * r00 + m01 * r01 + m02 * r02,
-      m00 * r10 + m01 * r11 + m02 * r12,
-      m00 * r20 + m01 * r21 + m02 * r22
-    );
-
-    w1?.set(
-      m10 * r00 + m11 * r01 + m12 * r02,
-      m10 * r10 + m11 * r11 + m12 * r12,
-      m10 * r20 + m11 * r21 + m12 * r22
-    );
-
-    w2?.set(
-      m20 * r00 + m21 * r01 + m22 * r02,
-      m20 * r10 + m21 * r11 + m22 * r12,
-      m20 * r20 + m21 * r21 + m22 * r22
-    );
+  public putToSleep(): void {
+    if (this.isStatic) return;
+    this.isSleeping = true;
+    this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+    this.force.set(0, 0, 0);
+    this.torque.set(0, 0, 0);
   }
 
   public applyForce(f: Vec3): void {
     if (this.isStatic) return;
-    this.force?.addInPlace(f);
+    this.wakeUp();
+    this.force.x += f.x;
+    this.force.y += f.y;
+    this.force.z += f.z;
   }
 
-  public applyTorque(t: Vec3): void {
+  public applyForceAtPoint(f: Vec3, pt: Vec3): void {
     if (this.isStatic) return;
-    this.torque?.addInPlace(t);
+    this.wakeUp();
+    this.force.x += f.x;
+    this.force.y += f.y;
+    this.force.z += f.z;
+
+    const rx = pt.x - this.position.x;
+    const ry = pt.y - this.position.y;
+    const rz = pt.z - this.position.z;
+
+    this.torque.x += ry * f.z - rz * f.y;
+    this.torque.y += rz * f.x - rx * f.z;
+    this.torque.z += rx * f.y - ry * f.x;
   }
 
-  public applyImpulse(j: Vec3, r: Vec3): void {
+  public applyImpulse(impulse: Vec3, r?: Vec3, wake: boolean = true): void {
     if (this.isStatic) return;
+    if (wake) this.wakeUp();
+    this.velocity.x += impulse.x * this.invMass;
+    this.velocity.y += impulse.y * this.invMass;
+    this.velocity.z += impulse.z * this.invMass;
 
-    this.velocity?.addScaledInPlace(j, this.invMass);
+    if (r) {
+      const tx = r.y * impulse.z - r.z * impulse.y;
+      const ty = r.z * impulse.x - r.x * impulse.z;
+      const tz = r.x * impulse.y - r.y * impulse.x;
 
-    // Angular impulse: deltaW = I_world^-1 * (r x J)
-    const rx = r.y * j.z - r.z * j.y;
-    const ry = r.z * j.x - r.x * j.z;
-    const rz = r.x * j.y - r.y * j.x;
-
-    const w0 = this.worldInvInertia.at(0);
-    const w1 = this.worldInvInertia.at(1);
-    const w2 = this.worldInvInertia.at(2);
-
-    if (w0 && w1 && w2) {
-      const dwX = w0.x * rx + w0.y * ry + w0.z * rz;
-      const dwY = w1.x * rx + w1.y * ry + w1.z * rz;
-      const dwZ = w2.x * rx + w2.y * ry + w2.z * rz;
-      this.angularVelocity?.set(
-        this.angularVelocity.x + dwX,
-        this.angularVelocity.y + dwY,
-        this.angularVelocity.z + dwZ
+      const dw = new Vec3(
+        this.worldInvInertia[0].x * tx + this.worldInvInertia[0].y * ty + this.worldInvInertia[0].z * tz,
+        this.worldInvInertia[1].x * tx + this.worldInvInertia[1].y * ty + this.worldInvInertia[1].z * tz,
+        this.worldInvInertia[2].x * tx + this.worldInvInertia[2].y * ty + this.worldInvInertia[2].z * tz
       );
+
+      this.angularVelocity.x += dw.x;
+      this.angularVelocity.y += dw.y;
+      this.angularVelocity.z += dw.z;
     }
+  }
+
+  public integrateForces(gravity: Vec3, wind: Vec3, dt: number): void {
+    if (this.isStatic || this.isSleeping) return;
+
+    this.velocity.x += (gravity.x + wind.x + this.force.x * this.invMass) * dt;
+    this.velocity.y += (gravity.y + wind.y + this.force.y * this.invMass) * dt;
+    this.velocity.z += (gravity.z + wind.z + this.force.z * this.invMass) * dt;
+
+    const dwX = this.worldInvInertia[0].x * this.torque.x + this.worldInvInertia[0].y * this.torque.y + this.worldInvInertia[0].z * this.torque.z;
+    const dwY = this.worldInvInertia[1].x * this.torque.x + this.worldInvInertia[1].y * this.torque.y + this.worldInvInertia[1].z * this.torque.z;
+    const dwZ = this.worldInvInertia[2].x * this.torque.x + this.worldInvInertia[2].y * this.torque.y + this.worldInvInertia[2].z * this.torque.z;
+
+    this.angularVelocity.x += dwX * dt;
+    this.angularVelocity.y += dwY * dt;
+    this.angularVelocity.z += dwZ * dt;
+
+    this.force.set(0, 0, 0);
+    this.torque.set(0, 0, 0);
+  }
+
+  public integrateVelocity(dt: number, airResistance: number = 0.999, angularDamping: number = 0.995): void {
+    if (this.isStatic || this.isSleeping) return;
+
+    this.velocity.x *= airResistance;
+    this.velocity.y *= airResistance;
+    this.velocity.z *= airResistance;
+
+    this.angularVelocity.x *= angularDamping;
+    this.angularVelocity.y *= angularDamping;
+    this.angularVelocity.z *= angularDamping;
+
+    this.position.x += this.velocity.x * dt;
+    this.position.y += this.velocity.y * dt;
+    this.position.z += this.velocity.z * dt;
+
+    this.orientation.integrate(this.angularVelocity, dt);
+    this.orientation.normalize();
+
+    this.updateTransform();
+  }
+
+  public updateInertiaTensor(): void {
+    if (this.isStatic) return;
+
+    const rotMatrix: [Vec3, Vec3, Vec3] = [new Vec3(), new Vec3(), new Vec3()];
+    this.orientation.toRotationMatrix(rotMatrix);
+
+    const r0 = rotMatrix[0];
+    const r1 = rotMatrix[1];
+    const r2 = rotMatrix[2];
+
+    const ix = this.localInvInertia.x;
+    const iy = this.localInvInertia.y;
+    const iz = this.localInvInertia.z;
+
+    const m00 = r0.x * ix, m01 = r0.y * iy, m02 = r0.z * iz;
+    const m10 = r1.x * ix, m11 = r1.y * iy, m12 = r1.z * iz;
+    const m20 = r2.x * ix, m21 = r2.y * iy, m22 = r2.z * iz;
+
+    this.worldInvInertia[0].set(
+      m00 * r0.x + m01 * r0.y + m02 * r0.z,
+      m00 * r1.x + m01 * r1.y + m02 * r1.z,
+      m00 * r2.x + m01 * r2.y + m02 * r2.z
+    );
+    this.worldInvInertia[1].set(
+      m10 * r0.x + m11 * r0.y + m12 * r0.z,
+      m10 * r1.x + m11 * r1.y + m12 * r1.z,
+      m10 * r2.x + m11 * r2.y + m12 * r2.z
+    );
+    this.worldInvInertia[2].set(
+      m20 * r0.x + m21 * r0.y + m22 * r0.z,
+      m20 * r1.x + m21 * r1.y + m22 * r1.z,
+      m20 * r2.x + m21 * r2.y + m22 * r2.z
+    );
   }
 
   public updateTransform(): void {
     this.updateInertiaTensor();
 
     if (this.type === 'sphere') {
-      const r = this.radius;
-      this.aabbMin?.set(this.position.x - r, this.position.y - r, this.position.z - r);
-      this.aabbMax?.set(this.position.x + r, this.position.y + r, this.position.z + r);
+      this.aabbMin.set(this.position.x - this.radius, this.position.y - this.radius, this.position.z - this.radius);
+      this.aabbMax.set(this.position.x + this.radius, this.position.y + this.radius, this.position.z + this.radius);
+      this.currentAABB.set(this.aabbMin.x, this.aabbMin.y, this.aabbMin.z, this.aabbMax.x, this.aabbMax.y, this.aabbMax.z);
       return;
     }
 
-    const q = this.orientation;
-    const hw = this.halfExtents.x;
-    const hh = this.halfExtents.y;
-    const hd = this.halfExtents.z;
+    if (this.type === 'capsule') {
+      if (!this.capsule) this.capsule = new Capsule3D(this.radius, this.length);
+      this.capsule.getAABB(this.position, this.orientation, this.currentAABB);
+      this.aabbMin.copy(this.currentAABB.min);
+      this.aabbMax.copy(this.currentAABB.max);
+      return;
+    }
 
-    // 8 Local Corner Points
+    const hx = this.halfExtents.x;
+    const hy = this.halfExtents.y;
+    const hz = this.halfExtents.z;
+
+    this.axes[0].set(1, 0, 0);
+    this.axes[1].set(0, 1, 0);
+    this.axes[2].set(0, 0, 1);
+    this.orientation.rotateVec3(this.axes[0], this.axes[0]);
+    this.orientation.rotateVec3(this.axes[1], this.axes[1]);
+    this.orientation.rotateVec3(this.axes[2], this.axes[2]);
+
     const signs = [
       [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
-      [-1, -1,  1], [1, -1,  1], [1, 1,  1], [-1, 1,  1]
+      [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
     ];
 
-    let minX = Number.MAX_VALUE, minY = Number.MAX_VALUE, minZ = Number.MAX_VALUE;
-    let maxX = -Number.MAX_VALUE, maxY = -Number.MAX_VALUE, maxZ = -Number.MAX_VALUE;
+    let minX = Number.MAX_VALUE, maxX = -Number.MAX_VALUE;
+    let minY = Number.MAX_VALUE, maxY = -Number.MAX_VALUE;
+    let minZ = Number.MAX_VALUE, maxZ = -Number.MAX_VALUE;
 
-    const tempV = new Vec3();
+    const localPt = new Vec3();
     for (let i = 0; i < 8; i++) {
-      const s = signs.at(i) ?? [-1, -1, -1];
-      const sx = s.at(0) ?? -1;
-      const sy = s.at(1) ?? -1;
-      const sz = s.at(2) ?? -1;
-
-      tempV?.set(sx * hw, sy * hh, sz * hd);
-      const v = this.vertices.at(i);
-      if (v) {
-        q.rotateVector(tempV, v);
-        v.addInPlace(this.position);
-
-        if (v.x < minX) minX = v.x;
-        if (v.x > maxX) maxX = v.x;
-        if (v.y < minY) minY = v.y;
-        if (v.y > maxY) maxY = v.y;
-        if (v.z < minZ) minZ = v.z;
-        if (v.z > maxZ) maxZ = v.z;
-      }
-    }
-
-    // 3 Principal Normal Axes
-    const a0 = this.axes.at(0);
-    const a1 = this.axes.at(1);
-    const a2 = this.axes.at(2);
-
-    if (a0) q.rotateVector(tempV.set(1, 0, 0), a0);
-    if (a1) q.rotateVector(tempV.set(0, 1, 0), a1);
-    if (a2) q.rotateVector(tempV.set(0, 0, 1), a2);
-
-    this.aabbMin?.set(minX, minY, minZ);
-    this.aabbMax?.set(maxX, maxY, maxZ);
-  }
-
-  public integrateForces(gravity: Vec3, wind: Vec3, dt: number): void {
-    if (this.isStatic) return;
-
-    this.velocity?.addScaledInPlace(gravity, dt);
-    this.velocity?.addScaledInPlace(wind, dt);
-    this.velocity?.addScaledInPlace(this.force, this.invMass * dt);
-
-    // Angular acceleration = I_world^-1 * torque
-    const tx = this.torque.x;
-    const ty = this.torque.y;
-    const tz = this.torque.z;
-
-    const w0 = this.worldInvInertia.at(0);
-    const w1 = this.worldInvInertia.at(1);
-    const w2 = this.worldInvInertia.at(2);
-
-    if (w0 && w1 && w2) {
-      const dAngX = (w0.x * tx + w0.y * ty + w0.z * tz) * dt;
-      const dAngY = (w1.x * tx + w1.y * ty + w1.z * tz) * dt;
-      const dAngZ = (w2.x * tx + w2.y * ty + w2.z * tz) * dt;
-      this.angularVelocity?.set(
-        this.angularVelocity.x + dAngX,
-        this.angularVelocity.y + dAngY,
-        this.angularVelocity.z + dAngZ
+      const s = signs[i];
+      localPt.set(s[0] * hx, s[1] * hy, s[2] * hz);
+      const worldOffset = this.orientation.rotateVec3(localPt);
+      const v = this.vertices[i];
+      v.set(
+        this.position.x + worldOffset.x,
+        this.position.y + worldOffset.y,
+        this.position.z + worldOffset.z
       );
+
+      if (v.x < minX) minX = v.x;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+      if (v.z < minZ) minZ = v.z;
+      if (v.z > maxZ) maxZ = v.z;
     }
 
-    this.force?.set(0, 0, 0);
-    this.torque?.set(0, 0, 0);
+    this.aabbMin.set(minX, minY, minZ);
+    this.aabbMax.set(maxX, maxY, maxZ);
+    this.currentAABB.set(minX, minY, minZ, maxX, maxY, maxZ);
   }
 
-  public integrateVelocity(dt: number, linearDamping: number = 0.999, angularDamping: number = 0.995): void {
-    if (this.isStatic) return;
-
-    this.position?.addScaledInPlace(this.velocity, dt);
-    this.orientation?.integrateAngularVelocity(this.angularVelocity, dt);
-
-    this.velocity?.scaleInPlace(linearDamping);
-    this.angularVelocity?.scaleInPlace(angularDamping);
-
-    this.updateTransform();
+  public getAABB(outAABB?: AABB3D): AABB3D {
+    const target = outAABB || this.currentAABB;
+    target.set(this.aabbMin.x, this.aabbMin.y, this.aabbMin.z, this.aabbMax.x, this.aabbMax.y, this.aabbMax.z);
+    return target;
   }
 }
