@@ -5,6 +5,17 @@ export * from './particles';
 export * from './broadphase/bvh';
 export * from './shapes/capsule';
 export * from './queries/raycast';
+export * from './queries/ccd';
+
+// Constraints & Multi-Joints
+export * from './constraints/types';
+export * from './constraints/distance_joint';
+export * from './constraints/revolute_joint';
+export * from './constraints/prismatic_joint';
+
+// Gameplay Physics Controllers
+export * from './controllers/character2d';
+export * from './controllers/character3d';
 
 // 2D Physics Subsystem
 export * from './engine2d/body2d';

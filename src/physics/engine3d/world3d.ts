@@ -1,4 +1,4 @@
-﻿import { Vec3 } from '../../math/vec3';
+import { Vec3 } from '../../math/vec3';
 import { RigidBody3D } from './body3d';
 import { CollisionSystem3D, ContactManifold3D, ManifoldPool3D } from './collision3d';
 import { ParticlePool3D } from '../common/pool';
@@ -7,6 +7,8 @@ import { DynamicBVHTree3D } from '../broadphase/bvh';
 import { IslandSleepingManager, ISleepContact } from '../common/sleeping';
 import { Ray3D, RayHit3D, rayVsSphere3D, rayVsBox3D, rayVsCapsule3D } from '../queries/raycast';
 import { Capsule3D } from '../shapes/capsule';
+import { IConstraint3D } from '../constraints/types';
+import { TimeOfImpact3D, sweepSphereVsSphere, sweepSphereVsBox3D, sweepSphereVsCapsule3D } from '../queries/ccd';
 
 export interface WorldOptions3D {
   gravity?: Vec3;
@@ -19,9 +21,11 @@ export interface WorldOptions3D {
 
 const SCRATCH_EXPLOSION_DIR = new Vec3();
 const SCRATCH_EXPLOSION_IMPULSE = new Vec3();
+const SCRATCH_CCD_TOI_3D = new TimeOfImpact3D();
 
 /**
- * PhysicsWorld3D - 3D Physics Simulator with Dynamic BVH Tree, Island Sleeping, and Raycasting.
+ * PhysicsWorld3D - 3D Physics Simulator with Dynamic BVH Tree, Island Sleeping, Raycasting,
+ * Continuous Collision Detection (CCD), and Multi-Joint Constraints.
  */
 export class PhysicsWorld3D implements IDimensionalEngine {
   public readonly dimension: DimensionMode = '3d';
@@ -33,6 +37,7 @@ export class PhysicsWorld3D implements IDimensionalEngine {
   public bounds: { width: number; height: number; depth: number };
 
   public bodies: RigidBody3D[] = [];
+  public constraints: IConstraint3D[] = [];
   public manifoldPool: ManifoldPool3D = new ManifoldPool3D(1024);
   public particlePool: ParticlePool3D = new ParticlePool3D(1000);
   public activeManifolds: ContactManifold3D[] = [];
@@ -76,6 +81,22 @@ export class PhysicsWorld3D implements IDimensionalEngine {
     }
   }
 
+  public addConstraint(constraint: IConstraint3D): IConstraint3D {
+    this.constraints.push(constraint);
+    return constraint;
+  }
+
+  public removeConstraint(constraint: IConstraint3D): void {
+    const idx = this.constraints.indexOf(constraint);
+    if (idx !== -1) {
+      this.constraints.splice(idx, 1);
+    }
+  }
+
+  public clearConstraints(): void {
+    this.constraints = [];
+  }
+
   public clearBodies(): void {
     for (let i = 0; i < this.bodies.length; i++) {
       const b = this.bodies[i];
@@ -85,6 +106,7 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       }
     }
     this.bodies = [];
+    this.constraints = [];
     this.manifoldPool?.clear();
     this.particlePool?.clear();
     this.activeManifolds = [];
@@ -171,7 +193,18 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       b.integrateForces(this.gravity, this.windForce, dt);
     }
 
-    // 2. Integrate Velocities and Update BVH Proxies
+    // 2. Continuous Collision Detection (CCD) for fast-moving Bullet bodies
+    for (let i = 0; i < bodyCount; i++) {
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping || !b.isBullet) continue;
+
+      const disp = b.velocity.clone().scale(dt);
+      if (disp.length() > b.radius * 0.5) {
+        this.performCCD3D(b, disp, dt);
+      }
+    }
+
+    // 3. Integrate Velocities and Update BVH Proxies
     for (let i = 0; i < bodyCount; i++) {
       const b = this.bodies[i];
       if (!b || b.isStatic || b.isSleeping) continue;
@@ -183,7 +216,7 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       }
     }
 
-    // 3. Broadphase Collision via Dynamic BVH Tree
+    // 4. Broadphase Collision via Dynamic BVH Tree
     this.manifoldPool.clear();
     this.activeManifolds = [];
 
@@ -208,19 +241,29 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       }
     });
 
-    // 4. Island Sleeping System Update
+    // 5. Constraints Pre-Solve
+    const constraintCount = this.constraints.length;
+    for (let c = 0; c < constraintCount; c++) {
+      this.constraints[c].preSolve(dt);
+    }
+
+    // 6. Island Sleeping System Update
     const sleepContacts: ISleepContact<RigidBody3D>[] = [];
     for (let m = 0; m < this.activeManifolds.length; m++) {
-      const c = this.activeManifolds[m];
-      if (c.bodyA && c.bodyB) {
-        sleepContacts.push({ bodyA: c.bodyA, bodyB: c.bodyB });
+      const ct = this.activeManifolds[m];
+      if (ct.bodyA && ct.bodyB) {
+        sleepContacts.push({ bodyA: ct.bodyA, bodyB: ct.bodyB });
       }
     }
     this.sleepingManager.update(this.bodies, sleepContacts, dt);
 
-    // 5. Sequential Impulse Solver
+    // 7. Sequential Impulse Solver
     const manifoldCount = this.activeManifolds.length;
     for (let it = 0; it < this.solverIterations; it++) {
+      for (let c = 0; c < constraintCount; c++) {
+        this.constraints[c].solveVelocity();
+      }
+
       for (let m = 0; m < manifoldCount; m++) {
         const manifold = this.activeManifolds[m];
         if (manifold) {
@@ -229,11 +272,56 @@ export class PhysicsWorld3D implements IDimensionalEngine {
       }
     }
 
-    // 6. Position Stabilization
+    // 8. Position Stabilization
     for (let m = 0; m < manifoldCount; m++) {
       const manifold = this.activeManifolds[m];
       if (manifold) {
         CollisionSystem3D.resolvePosition(manifold, 0.2, 0.05);
+      }
+    }
+
+    for (let c = 0; c < constraintCount; c++) {
+      this.constraints[c].solvePosition(0.2, 0.05);
+    }
+  }
+
+  private performCCD3D(bullet: RigidBody3D, disp: Vec3, dt: number): void {
+    let minTOI = 1.0;
+    const hitNormal = new Vec3();
+    let hitFound = false;
+
+    for (let i = 0; i < this.bodies.length; i++) {
+      const other = this.bodies[i];
+      if (other.id === bullet.id || other.isTrigger) continue;
+
+      const otherDisp = other.isStatic ? new Vec3() : other.velocity.clone().scale(dt);
+
+      let hit = false;
+      if (other.type === 'sphere') {
+        hit = sweepSphereVsSphere(bullet.position, disp, bullet.radius, other.position, otherDisp, other.radius, SCRATCH_CCD_TOI_3D);
+      } else if (other.type === 'cube') {
+        hit = sweepSphereVsBox3D(bullet.position, disp, bullet.radius, other.position, other.halfExtents, other.orientation, SCRATCH_CCD_TOI_3D);
+      } else if (other.type === 'capsule') {
+        const cap = other.capsule || new Capsule3D(other.radius, other.length);
+        hit = sweepSphereVsCapsule3D(bullet.position, disp, bullet.radius, cap, other.position, other.orientation, SCRATCH_CCD_TOI_3D);
+      }
+
+      if (hit && SCRATCH_CCD_TOI_3D.toi < minTOI) {
+        minTOI = SCRATCH_CCD_TOI_3D.toi;
+        hitNormal.copy(SCRATCH_CCD_TOI_3D.normal);
+        hitFound = true;
+      }
+    }
+
+    if (hitFound && minTOI < 1.0) {
+      bullet.position.x += disp.x * minTOI;
+      bullet.position.y += disp.y * minTOI;
+      bullet.position.z += disp.z * minTOI;
+
+      const dot = bullet.velocity.dot(hitNormal);
+      if (dot < 0) {
+        const e = bullet.restitution;
+        bullet.velocity.subInPlace(hitNormal.clone().scale((1.0 + e) * dot));
       }
     }
   }
@@ -245,7 +333,7 @@ export class PhysicsWorld3D implements IDimensionalEngine {
     outHit.reset();
     let hitFound = false;
 
-    this.bvhTree.queryRay(ray.origin, ray.direction, 1.0, (body: RigidBody3D) => {
+    this.bvhTree.queryRay(ray.origin, ray.direction, ray.maxDistance, (body: RigidBody3D) => {
       if ((body.layerMask & ray.layerMask) === 0) return 1.0;
 
       const localHit = new RayHit3D();

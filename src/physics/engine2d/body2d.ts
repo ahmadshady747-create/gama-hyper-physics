@@ -20,6 +20,7 @@ export interface BodyOptions2D {
   isStatic?: boolean;
   color?: string;
   isTrigger?: boolean;
+  isBullet?: boolean;
   layerMask?: number;
   canSleep?: boolean;
 }
@@ -77,6 +78,10 @@ export class RigidBody2D implements ISleepableBody {
   public isTrigger: boolean = false;
   public layerMask: number = 0xFFFFFFFF;
 
+  // Continuous Collision Detection (CCD)
+  public isBullet: boolean = false;
+  public ccdSwept: boolean = false;
+
   // Visual Customization
   public color: string;
 
@@ -106,6 +111,7 @@ export class RigidBody2D implements ISleepableBody {
     this.friction = typeof options?.friction === 'number' ? Math.max(0, Math.min(1, options.friction)) : 0.3;
     this.isStatic = Boolean(options?.isStatic);
     this.isTrigger = Boolean(options?.isTrigger);
+    this.isBullet = Boolean(options?.isBullet);
     this.layerMask = options?.layerMask ?? 0xFFFFFFFF;
     this.canSleep = options?.canSleep !== undefined ? options.canSleep : true;
 

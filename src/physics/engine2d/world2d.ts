@@ -1,4 +1,4 @@
-﻿import { Vec2 } from '../../math/vec2';
+import { Vec2 } from '../../math/vec2';
 import { RigidBody2D } from './body2d';
 import { CollisionSystem2D, ContactManifold2D, ManifoldPool2D } from './collision2d';
 import { ParticlePool } from '../particles';
@@ -7,6 +7,8 @@ import { DynamicBVHTree2D, AABB2D } from '../broadphase/bvh';
 import { IslandSleepingManager, ISleepContact } from '../common/sleeping';
 import { Ray2D, RayHit2D, rayVsCircle2D, rayVsBox2D, rayVsCapsule2D } from '../queries/raycast';
 import { Capsule2D, closestPointSegmentPoint2D } from '../shapes/capsule';
+import { IConstraint2D } from '../constraints/types';
+import { TimeOfImpact2D, sweepCircleVsCircle, sweepCircleVsBox2D } from '../queries/ccd';
 
 export interface WorldOptions2D {
   gravity?: Vec2;
@@ -18,9 +20,11 @@ export interface WorldOptions2D {
 
 const SCRATCH_EXPLOSION_DIR = new Vec2();
 const SCRATCH_EXPLOSION_IMPULSE = new Vec2();
+const SCRATCH_CCD_TOI = new TimeOfImpact2D();
 
 /**
- * PhysicsWorld2D - 2D Physics Simulator with Dynamic BVH Tree, Island Sleeping, and Raycasting.
+ * PhysicsWorld2D - 2D Physics Simulator with Dynamic BVH Tree, Island Sleeping, Raycasting,
+ * Continuous Collision Detection (CCD), and Multi-Joint Constraints.
  */
 export class PhysicsWorld2D implements IDimensionalEngine {
   public readonly dimension: DimensionMode = '2d';
@@ -32,6 +36,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
   public bounds: { width: number; height: number };
 
   public bodies: RigidBody2D[] = [];
+  public constraints: IConstraint2D[] = [];
   public manifoldPool: ManifoldPool2D = new ManifoldPool2D(1024);
   public particlePool: ParticlePool = new ParticlePool(1000);
   public activeManifolds: ContactManifold2D[] = [];
@@ -74,6 +79,22 @@ export class PhysicsWorld2D implements IDimensionalEngine {
     }
   }
 
+  public addConstraint(constraint: IConstraint2D): IConstraint2D {
+    this.constraints.push(constraint);
+    return constraint;
+  }
+
+  public removeConstraint(constraint: IConstraint2D): void {
+    const idx = this.constraints.indexOf(constraint);
+    if (idx !== -1) {
+      this.constraints.splice(idx, 1);
+    }
+  }
+
+  public clearConstraints(): void {
+    this.constraints = [];
+  }
+
   public clearBodies(): void {
     for (let i = 0; i < this.bodies.length; i++) {
       const b = this.bodies[i];
@@ -83,6 +104,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       }
     }
     this.bodies = [];
+    this.constraints = [];
     this.manifoldPool?.clear();
     this.particlePool?.clear();
     this.activeManifolds = [];
@@ -168,7 +190,21 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       b.integrateForces(this.gravity, this.windForce, dt);
     }
 
-    // 2. Integrate Velocities and Update BVH Proxies
+    // 2. Continuous Collision Detection (CCD) for fast-moving Bullet bodies
+    for (let i = 0; i < bodyCount; i++) {
+      const b = this.bodies[i];
+      if (!b || b.isStatic || b.isSleeping || !b.isBullet) continue;
+
+      const dispX = b.velocity.x * dt;
+      const dispY = b.velocity.y * dt;
+      const dispLen = Math.sqrt(dispX * dispX + dispY * dispY);
+
+      if (dispLen > b.radius * 0.5) {
+        this.performCCD2D(b, new Vec2(dispX, dispY), dt);
+      }
+    }
+
+    // 3. Integrate Velocities and Update BVH Proxies
     for (let i = 0; i < bodyCount; i++) {
       const b = this.bodies[i];
       if (!b || b.isStatic || b.isSleeping) continue;
@@ -180,7 +216,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       }
     }
 
-    // 3. Broadphase Collision via Dynamic BVH Tree
+    // 4. Broadphase Collision via Dynamic BVH Tree
     this.manifoldPool.clear();
     this.activeManifolds = [];
 
@@ -205,19 +241,29 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       }
     });
 
-    // 4. Island Sleeping System Update
+    // 5. Constraints Pre-Solve
+    const constraintCount = this.constraints.length;
+    for (let c = 0; c < constraintCount; c++) {
+      this.constraints[c].preSolve(dt);
+    }
+
+    // 6. Island Sleeping System Update
     const sleepContacts: ISleepContact<RigidBody2D>[] = [];
     for (let m = 0; m < this.activeManifolds.length; m++) {
-      const c = this.activeManifolds[m];
-      if (c.bodyA && c.bodyB) {
-        sleepContacts.push({ bodyA: c.bodyA, bodyB: c.bodyB });
+      const ct = this.activeManifolds[m];
+      if (ct.bodyA && ct.bodyB) {
+        sleepContacts.push({ bodyA: ct.bodyA, bodyB: ct.bodyB });
       }
     }
     this.sleepingManager.update(this.bodies, sleepContacts, dt);
 
-    // 5. Sequential Impulse Solver
+    // 7. Sequential Impulse Solver (Contacts + Joint Constraints)
     const manifoldCount = this.activeManifolds.length;
     for (let it = 0; it < this.solverIterations; it++) {
+      for (let c = 0; c < constraintCount; c++) {
+        this.constraints[c].solveVelocity();
+      }
+
       for (let m = 0; m < manifoldCount; m++) {
         const manifold = this.activeManifolds[m];
         if (manifold) {
@@ -226,11 +272,54 @@ export class PhysicsWorld2D implements IDimensionalEngine {
       }
     }
 
-    // 6. Baumgarte Position Stabilization
+    // 8. Baumgarte Position Stabilization
     for (let m = 0; m < manifoldCount; m++) {
       const manifold = this.activeManifolds[m];
       if (manifold) {
         CollisionSystem2D.resolvePosition(manifold, 0.2, 0.05);
+      }
+    }
+
+    for (let c = 0; c < constraintCount; c++) {
+      this.constraints[c].solvePosition(0.2, 0.05);
+    }
+  }
+
+  private performCCD2D(bullet: RigidBody2D, disp: Vec2, dt: number): void {
+    let minTOI = 1.0;
+    const hitNormal = new Vec2();
+    let hitFound = false;
+
+    for (let i = 0; i < this.bodies.length; i++) {
+      const other = this.bodies[i];
+      if (other.id === bullet.id || other.isTrigger) continue;
+
+      const otherDisp = other.isStatic ? new Vec2() : new Vec2(other.velocity.x * dt, other.velocity.y * dt);
+
+      let hit = false;
+      if (other.type === 'circle') {
+        hit = sweepCircleVsCircle(bullet.position, disp, bullet.radius, other.position, otherDisp, other.radius, SCRATCH_CCD_TOI);
+      } else if (other.type === 'box') {
+        hit = sweepCircleVsBox2D(bullet.position, disp, bullet.radius, other.position, other.halfExtents, other.angle, SCRATCH_CCD_TOI);
+      }
+
+      if (hit && SCRATCH_CCD_TOI.toi < minTOI) {
+        minTOI = SCRATCH_CCD_TOI.toi;
+        hitNormal.copy(SCRATCH_CCD_TOI.normal);
+        hitFound = true;
+      }
+    }
+
+    if (hitFound && minTOI < 1.0) {
+      bullet.position.x += disp.x * minTOI;
+      bullet.position.y += disp.y * minTOI;
+
+      // Reflect bullet velocity
+      const dot = bullet.velocity.x * hitNormal.x + bullet.velocity.y * hitNormal.y;
+      if (dot < 0) {
+        const e = bullet.restitution;
+        bullet.velocity.x -= (1.0 + e) * hitNormal.x * dot;
+        bullet.velocity.y -= (1.0 + e) * hitNormal.y * dot;
       }
     }
   }
@@ -287,7 +376,7 @@ export class PhysicsWorld2D implements IDimensionalEngine {
     outHit.reset();
     let hitFound = false;
 
-    this.bvhTree.queryRay(ray.origin, ray.direction, 1.0, (body: RigidBody2D) => {
+    this.bvhTree.queryRay(ray.origin, ray.direction, ray.maxDistance, (body: RigidBody2D) => {
       if ((body.layerMask & ray.layerMask) === 0) return 1.0;
 
       const localHit = new RayHit2D();

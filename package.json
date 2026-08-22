@@ -12,7 +12,7 @@
         "build": "tsc && vite build",
         "preview": "vite preview",
         "typecheck": "tsc --noEmit",
-        "test": "tsx tests/phase1_verification.ts",
+        "test": "tsx tests/run_all.ts",
         "mcp": "tsx src/mcp/server.ts"
     },
     "repository": {
