@@ -5,10 +5,10 @@ A high-performance, lightweight, multi-dimensional physics sandbox engine writte
 ---
 
 > ### 🌟 Special Acknowledgment / إشادة خاصة
-> **The development and architectural precision of the GAMA engine from the ground up would not have been possible or as seamless without the LOCUS Engine Verification & Synthesis Protocol.**  
+> **The development and architectural precision of the GAMA engine from the ground up would not have been possible or as seamless without the [LOCUS Engine Verification & Synthesis Protocol](https://github.com/ahmadshady747-create/LOCUS).**  
 > The LOCUS protocol provided rigorous pre-generation invariant verification, AST safety guarantees, and deterministic mathematical safeguards, ensuring **0 AST Violations, Zero-NaN guards, and 100% Zero-GC runtime memory stability** across all spatial regimes.
 > 
-> *إن بناء وهندسة محرك **GAMA** متعدد الأبعاد من الصفر وبدون أي مكتبات مساعدة لم يكن ليحدث بهذه السهولة والدقة الفائقة لولا محرك وبروتوكول **LOCUS** الحتمي للتحقق والتوليد الآمن.*
+> *إن بناء وهندسة محرك **GAMA** متعدد الأبعاد من الصفر وبدون أي مكتبات مساعدة لم يكن ليحدث بهذه السهولة والدقة الفائقة لولا محرك وبروتوكول [**LOCUS Engine**](https://github.com/ahmadshady747-create/LOCUS) الحتمي للتحقق والتوليد الآمن.*
 
 ---
 
@@ -121,3 +121,4 @@ npm run build
 ## 📄 License
 
 This project is open-source software licensed under the [MIT License](LICENSE).
+
