@@ -1,25 +1,51 @@
 {
     "name": "gama-hyper-physics",
-    "version": "1.0.0",
-    "description": "GAMA Multi-Dimensional Physics Sandbox (2D / 3D / 4D Hyper-Physics) with Model Context Protocol (MCP) Server in Pure TypeScript",
-    "main": "index.js",
+    "version": "2.0.0",
+    "description": "GAMA Multi-Dimensional Multiphysics Compute Engine (2D/3D/4D/5D Physics, WebGPU Compute, Relativistic Geodesics, Quantum Mechanics, Molecular Dynamics, Biomechanics, Aerodynamics, DEM Granular, Neural Surrogates & MCP Server) in Pure TypeScript",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "directories": {
         "test": "tests"
     },
     "type": "module",
+    "bin": {
+        "gama-mcp": "./dist/master_mcp/cli.js"
+    },
     "scripts": {
         "dev": "vite",
         "build": "tsc && vite build",
         "preview": "vite preview",
         "typecheck": "tsc --noEmit",
         "test": "tsx tests/run_all.ts",
-        "mcp": "tsx src/mcp/server.ts"
+        "start:mcp": "tsx src/master_mcp/cli.ts",
+        "mcp": "tsx src/master_mcp/cli.ts",
+        "sim": "tsx src/cli.ts",
+        "sim:2d": "tsx src/cli.ts --dim 2d --bodies 50 --steps 300",
+        "sim:3d": "tsx src/cli.ts --dim 3d --bodies 40 --steps 300",
+        "sim:4d": "tsx src/cli.ts --dim 4d --bodies 25 --steps 200",
+        "sim:5d": "tsx src/cli.ts --dim 5d --bodies 20 --steps 200",
+        "benchmark": "tsx tests/mega_phase_31_32_verification.ts"
     },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/ahmadshady747-create/gama-hyper-physics.git"
     },
-    "keywords": [],
+    "keywords": [
+        "physics",
+        "multiphysics",
+        "webgpu",
+        "hyperphysics",
+        "4d-physics",
+        "5d-physics",
+        "quantum-mechanics",
+        "relativity",
+        "molecular-dynamics",
+        "biomechanics",
+        "mcp",
+        "model-context-protocol",
+        "zero-gc",
+        "locus"
+    ],
     "author": "",
     "license": "MIT",
     "bugs": {
@@ -28,6 +54,7 @@
     "homepage": "https://github.com/ahmadshady747-create/gama-hyper-physics#readme",
     "devDependencies": {
         "@types/node": "^26.2.0",
+        "@webgpu/types": "^0.1.72",
         "typescript": "^7.0.2",
         "vite": "^8.2.2"
     },
