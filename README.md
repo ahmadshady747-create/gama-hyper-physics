@@ -151,6 +151,10 @@ src/
 
 ---
 
+## 🔗 Related Projects
+
+- **[ProCraft](https://procraft-9lw.pages.dev)** — 55 free web tools that run entirely in your browser: JSON, text, encoding, colors, developer tools and more. No server, no tracking, no sign-in.
+
 ## 📄 License
 
 This project is open-source software licensed under the [MIT License](LICENSE).
