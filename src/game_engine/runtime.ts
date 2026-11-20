@@ -1,4 +1,3 @@
-import { Vec2 } from '../math';
 import { PhysicsWorld2D, RigidBody2D } from '../physics';
 import {
   AutoJuiceController,
