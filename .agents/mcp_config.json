@@ -9,6 +9,16 @@
       "env": {
         "NODE_ENV": "production"
       }
+    },
+    "gama-godot4": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "src/mcp/godot_mcp_server.ts"
+      ],
+      "env": {
+        "GODOT_BIN": "godot"
+      }
     }
   }
 }

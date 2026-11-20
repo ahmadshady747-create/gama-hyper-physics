@@ -1,7 +1,7 @@
 {
     "name": "gama-hyper-physics",
-    "version": "4.0.0",
-    "description": "GAMA AI-Agent Game Engine (Stateful Game Runtime, 4 Game Archetypes, Headless SVG Visual Snapshots, One-Click HTML5 Exporter, Auto-Juice, Headless Auto-Playtester, Zero-GC Physics & 14-Tool MCP Server)",
+    "version": "5.0.0",
+    "description": "GAMA AI-Agent Game Engine (Stateful Game Runtime, 4 Game Archetypes, Headless SVG Visual Snapshots, One-Click HTML5 Exporter, Auto-Juice, Headless Auto-Playtester, Zero-GC Physics, 14-Tool MCP Server & Godot 4.3 Bridge with 7-Tool MCP Server, GDScript Auditor and Headless QA Runner)",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "directories": {
@@ -19,6 +19,10 @@
         "test": "tsx tests/run_all.ts",
         "start:mcp": "tsx src/mcp/server.ts",
         "mcp": "tsx src/mcp/server.ts",
+        "test:godot": "tsx tests/godot_bridge_verification.ts",
+        "start:mcp:godot": "tsx src/mcp/godot_mcp_server.ts",
+        "mcp:godot": "tsx src/mcp/godot_mcp_server.ts",
+        "qa:godot": "godot --headless --path godot_project --script res://addons/gama_agent/agent_qa_runner.gd -- --scene=res://scenes/main.tscn --frames=120",
         "sim": "tsx src/cli.ts",
         "sim:2d": "tsx src/cli.ts --dim 2d --bodies 50 --steps 300",
         "sim:3d": "tsx src/cli.ts --dim 3d --bodies 40 --steps 300",
@@ -41,6 +45,8 @@
         "svg-snapshot",
         "html5-game-exporter",
         "auto-juice",
+        "godot-4",
+        "gdscript",
         "typescript"
     ],
     "author": "",
