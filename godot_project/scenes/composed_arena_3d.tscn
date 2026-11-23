@@ -1,0 +1,39 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/demo_player.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://scenes/ui_hud.tscn" id="2_scene"]
+[ext_resource type="PackedScene" path="res://scenes/mobile_touch_controls.tscn" id="3_scene"]
+[ext_resource type="PackedScene" path="res://scenes/pickup_crystal_3d.tscn" id="4_scene"]
+[ext_resource type="PackedScene" path="res://scenes/enemy_chaser_3d.tscn" id="5_scene"]
+[ext_resource type="PackedScene" path="res://scenes/moving_platform_3d.tscn" id="6_scene"]
+[ext_resource type="PackedScene" path="res://scenes/goal_portal_3d.tscn" id="7_scene"]
+
+[node name="GAMAQuantumArena3D" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 0)
+shadow_enabled = true
+
+[node name="Player3D" type="CharacterBody3D" parent="." groups=["player"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+script = ExtResource("1_script")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 10)
+current = true
+
+[node name="GameHUD" parent="." instance=ExtResource("2_scene")]
+
+[node name="MobileTouchControls" parent="." instance=ExtResource("3_scene")]
+
+[node name="EnergyCrystalA" parent="." instance=ExtResource("4_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1.2, -3)
+
+[node name="EnemyDroneA" parent="." instance=ExtResource("5_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1.5, -5)
+
+[node name="MovingPlatformA" parent="." instance=ExtResource("6_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+
+[node name="GoalPortal" parent="." instance=ExtResource("7_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, -12)

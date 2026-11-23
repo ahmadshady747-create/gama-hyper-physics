@@ -1,0 +1,40 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/twin_stick_player_2d.gd" id="1_twinstick"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_blaster"]
+radius = 20.0
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_barrier"]
+size = Vector2(220, 28)
+
+[node name="TwinStickCyber2D" type="Node2D"]
+
+[node name="CyberGridBg" type="Polygon2D" parent="."]
+color = Color(0.04, 0.06, 0.11, 1)
+polygon = PackedVector2Array(0, 0, 1280, 0, 1280, 720, 0, 720)
+
+[node name="CenterCover" type="StaticBody2D" parent="."]
+position = Vector2(640, 360)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CenterCover"]
+shape = SubResource("RectangleShape2D_barrier")
+
+[node name="CoverVisual" type="Polygon2D" parent="CenterCover"]
+color = Color(0.14, 0.22, 0.36, 1)
+polygon = PackedVector2Array(-110, -14, 110, -14, 110, 14, -110, 14)
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player"]]
+position = Vector2(320, 360)
+script = ExtResource("1_twinstick")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
+shape = SubResource("CircleShape2D_blaster")
+
+[node name="ShipVisual" type="Polygon2D" parent="Player"]
+color = Color(0.0, 0.94, 0.82, 1)
+polygon = PackedVector2Array(24, 0, -16, 18, -8, 0, -16, -18)
+
+[node name="Camera2D" type="Camera2D" parent="Player"]
+position_smoothing_enabled = true
+position_smoothing_speed = 9.0

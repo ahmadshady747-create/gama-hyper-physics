@@ -1,4 +1,5 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   createArchetypeGame,
   exportPlayableHtml,
@@ -16,6 +17,19 @@ import {
   PhysicsWorld4D,
   RigidBody4D,
 } from './physics';
+import { GodotArchetypeId, listArchetypes, scaffoldArchetype } from './godot/archetypes';
+import { auditGdScript } from './godot/gdscript_auditor';
+import { auditExportPresets, auditProjectHealth } from './godot/project_auditor';
+import {
+  captureGodotScreenshot,
+  checkGodotEnvironment,
+  listProjectFiles,
+  runGodotHeadlessQa,
+} from './godot/runner';
+
+function printJson(data: unknown): void {
+  console.log(JSON.stringify(data, null, 2));
+}
 
 function parseArg(flag: string, fallback: number): number {
   const idx = process.argv.indexOf(flag);
@@ -30,7 +44,7 @@ function parseStrArg(flag: string, fallback: string): string {
   return process.argv[idx + 1];
 }
 
-function main(): void {
+function runSimCli(): void {
   if (process.argv.includes('--export-demo')) {
     const archetype = parseStrArg('--archetype', 'tower_demolition') as GameArchetype;
     const spec = createArchetypeGame(archetype);
@@ -87,7 +101,133 @@ function main(): void {
   }
 
   const elapsedMs = performance.now() - t0;
-  console.log(JSON.stringify({ engine: 'GAMA AI Game Engine v4.0', dimension: dim.toUpperCase(), bodies, steps, totalContacts: contacts, elapsedMs: +elapsedMs.toFixed(2) }, null, 2));
+  console.log(JSON.stringify({ engine: 'GAMA AI Game Engine v5.19.0', dimension: dim.toUpperCase(), bodies, steps, totalContacts: contacts, elapsedMs: +elapsedMs.toFixed(2) }, null, 2));
+}
+
+function runGodotCli(): void {
+  const projectDir = resolve(process.cwd(), 'godot_project');
+  const [cmd = 'help', arg1, arg2] = process.argv.slice(2);
+
+  switch (cmd) {
+    case 'doctor':
+      printJson(checkGodotEnvironment());
+      break;
+
+    case 'inspect':
+      printJson({ projectDir, ...listProjectFiles(projectDir) });
+      break;
+
+    case 'audit': {
+      const { scripts } = listProjectFiles(projectDir);
+      const reports = scripts.map((resPath) => {
+        const full = resolve(projectDir, resPath.replace(/^res:\/\//, ''));
+        const src = readFileSync(full, 'utf-8');
+        return { file: resPath, ...auditGdScript(src) };
+      });
+      const exportAudit = auditExportPresets(projectDir);
+      const allValid = reports.every((r) => r.valid) && exportAudit.valid;
+      printJson({ totalScripts: reports.length, allValid, exportAudit, reports });
+      if (!allValid) process.exit(1);
+      break;
+    }
+
+    case 'health':
+      printJson(auditProjectHealth(projectDir));
+      break;
+
+    case 'archetypes':
+      printJson({ archetypes: listArchetypes() });
+      break;
+
+    case 'scaffold': {
+      const id = (arg1 || 'platformer_2d') as GodotArchetypeId;
+      printJson(scaffoldArchetype(projectDir, id, arg2));
+      break;
+    }
+
+    case 'qa':
+      printJson(
+        runGodotHeadlessQa(
+          projectDir,
+          arg1 || 'res://scenes/main.tscn',
+          arg2 ? Number(arg2) : 120
+        )
+      );
+      break;
+
+    case 'screenshot':
+      printJson(
+        captureGodotScreenshot(
+          projectDir,
+          arg1 || 'res://scenes/main.tscn',
+          arg2 ? resolve(projectDir, arg2) : undefined,
+          8
+        )
+      );
+      break;
+
+    default:
+      printJson({
+        cli: 'GAMA-Godot4 AI Studio CLI v5.19.0',
+        commands: [
+          'gama-godot doctor                         — Verify local Godot 4.3+ installation',
+          'gama-godot inspect                        — List all scenes, scripts, and assets',
+          'gama-godot audit                          — Audit all GDScript 4 files (28 rules) & export presets',
+          'gama-godot health                         — Run full project health & scene ExtResource audit',
+          'gama-godot archetypes                     — List available 2D & 3D game archetypes (5 templates)',
+          'gama-godot scaffold <id> [customPath]     — Scaffold an archetype into godot_project/',
+          'gama-godot qa [sceneResPath] [frames]     — Run headless SceneTree QA telemetry',
+          'gama-godot screenshot [sceneResPath] [out]— Capture live OpenGL3 PNG screenshot + pixel diagnostics',
+        ],
+      });
+      break;
+  }
+}
+
+function printCombinedHelp(): void {
+  printJson({
+    cli: 'GAMA AI Game Engine CLI v5.19.0',
+    godot: [
+      'doctor                         — Verify local Godot 4.3+ installation',
+      'inspect                        — List all scenes, scripts, and assets',
+      'audit                          — Audit all GDScript 4 files (28 rules) & export presets',
+      'health                         — Run full project health & scene ExtResource audit',
+      'archetypes                     — List available 2D & 3D game archetypes (5 templates)',
+      'scaffold <id> [customPath]     — Scaffold an archetype into godot_project/',
+      'qa [sceneResPath] [frames]     — Run headless SceneTree QA telemetry',
+      'screenshot [sceneResPath] [out]— Capture live OpenGL3 PNG screenshot + pixel diagnostics',
+    ],
+    simulator: [
+      '--dim 2d|3d|4d --bodies 50 --steps 200 — Headless physics benchmark',
+      '--playtest                              — Headless bot playtest QA',
+      '--snapshot                              — Headless SVG visual snapshot',
+      '--export-demo [--archetype id]          — Export standalone playable HTML5 game',
+    ],
+  });
+}
+
+const GODOT_COMMANDS = new Set([
+  'doctor',
+  'inspect',
+  'audit',
+  'health',
+  'archetypes',
+  'scaffold',
+  'qa',
+  'screenshot',
+]);
+
+function main(): void {
+  const [cmd] = process.argv.slice(2);
+  if (cmd === 'help' || cmd === '--help') {
+    printCombinedHelp();
+    return;
+  }
+  if (cmd !== undefined && GODOT_COMMANDS.has(cmd)) {
+    runGodotCli();
+    return;
+  }
+  runSimCli();
 }
 
 main();

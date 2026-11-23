@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemy_chaser_3d.gd" id="1_enemy3d"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_drone"]
+radius = 0.55
+
+[sub_resource type="SphereMesh" id="SphereMesh_drone"]
+radius = 0.55
+height = 1.1
+
+[node name="EnemyChaser3D" type="CharacterBody3D" groups=["enemies"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, 0)
+script = ExtResource("1_enemy3d")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_drone")
+
+[node name="DroneMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_drone")

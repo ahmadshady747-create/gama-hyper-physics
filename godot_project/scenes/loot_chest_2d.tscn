@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/loot_chest_2d.gd" id="1_chest2d"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_chest"]
+size = Vector2(44, 34)
+
+[node name="LootChest2D" type="Area2D" groups=["chests", "interactables"]]
+script = ExtResource("1_chest2d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_chest")
+
+[node name="ChestVisual" type="Polygon2D" parent="."]
+color = Color(0.95, 0.72, 0.16, 1)
+polygon = PackedVector2Array(-22, -17, 22, -17, 22, 17, -22, 17)

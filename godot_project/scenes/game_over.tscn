@@ -1,0 +1,58 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game_over.gd" id="1_gameover"]
+
+[node name="GameOverScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_gameover")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.08, 0.03, 0.05, 0.96)
+
+[node name="CenterPanel" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 390.0
+offset_top = 180.0
+offset_right = 890.0
+offset_bottom = 540.0
+color = Color(0.14, 0.06, 0.09, 0.96)
+
+[node name="TitleLabel" type="Label" parent="CenterPanel"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 44.0
+offset_right = 440.0
+offset_bottom = 90.0
+text = "GAME OVER"
+
+[node name="FinalScoreLabel" type="Label" parent="CenterPanel"]
+layout_mode = 0
+offset_left = 60.0
+offset_top = 110.0
+offset_right = 440.0
+offset_bottom = 146.0
+text = "SCORE: 0  |  BEST: 0"
+
+[node name="RetryButton" type="Button" parent="CenterPanel"]
+layout_mode = 0
+offset_left = 90.0
+offset_top = 180.0
+offset_right = 410.0
+offset_bottom = 236.0
+text = "PLAY AGAIN"
+
+[node name="MenuButton" type="Button" parent="CenterPanel"]
+layout_mode = 0
+offset_left = 90.0
+offset_top = 256.0
+offset_right = 410.0
+offset_bottom = 308.0
+text = "MAIN MENU"

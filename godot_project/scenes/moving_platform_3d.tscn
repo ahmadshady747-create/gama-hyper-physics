@@ -1,0 +1,18 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/moving_platform_3d.gd" id="1_plat3d"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plat"]
+size = Vector3(4, 0.5, 4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_plat"]
+size = Vector3(4, 0.5, 4)
+
+[node name="MovingPlatform3D" type="AnimatableBody3D" groups=["platforms"]]
+script = ExtResource("1_plat3d")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_plat")
+
+[node name="PlatformMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_plat")

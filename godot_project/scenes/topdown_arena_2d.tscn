@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/topdown_arena_player.gd" id="1_script"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_hero"]
+radius = 22.0
+
+[node name="TopDownArena2D" type="Node2D"]
+
+[node name="ArenaFloor" type="Polygon2D" parent="."]
+color = Color(0.06, 0.08, 0.14, 1)
+polygon = PackedVector2Array(0, 0, 1280, 0, 1280, 720, 0, 720)
+
+[node name="Player" type="CharacterBody2D" parent="."]
+position = Vector2(640, 360)
+script = ExtResource("1_script")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
+shape = SubResource("CircleShape2D_hero")
+
+[node name="CoreVisual" type="Polygon2D" parent="Player"]
+color = Color(0.0, 0.9, 0.77, 1)
+polygon = PackedVector2Array(0, -24, 22, 0, 0, 24, -22, 0)
+
+[node name="Camera2D" type="Camera2D" parent="Player"]

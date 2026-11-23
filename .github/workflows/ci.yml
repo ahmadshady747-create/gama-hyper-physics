@@ -1,0 +1,46 @@
+name: GAMA-Godot4 AI Studio CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Static Audit, Typecheck & Verification (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run 28-rule GDScript 4 & project health audit via CLI
+        run: npm run audit:gd
+
+      - name: Run full GAMA-Godot4 verification suite
+        run: npm test
+
+      - name: Compile TypeScript build
+        run: npm run build
+
+      - name: Smoke test build output and Godot CLI
+        run: |
+          test -f dist/index.html
+          npx tsx src/cli.ts archetypes

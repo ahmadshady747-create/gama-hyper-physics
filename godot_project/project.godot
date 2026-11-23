@@ -13,6 +13,16 @@ config/features=PackedStringArray("4.3", "GL Compatibility")
 
 Juice="*res://addons/gama_agent/juice.gd"
 AudioSynth="*res://addons/gama_agent/audio_synth.gd"
+GameState="*res://addons/gama_agent/game_state.gd"
+CinemaDirector="*res://addons/gama_agent/cinema_director.gd"
+CombatSystem="*res://addons/gama_agent/combat_system.gd"
+ProceduralVFX="*res://addons/gama_agent/procedural_vfx.gd"
+DialogueSystem="*res://addons/gama_agent/dialogue_system.gd"
+ObjectPool="*res://addons/gama_agent/object_pool.gd"
+PerfMonitor="*res://addons/gama_agent/perf_monitor.gd"
+QuestSystem="*res://addons/gama_agent/quest_system.gd"
+InventorySystem="*res://addons/gama_agent/inventory_system.gd"
+LocalizationSystem="*res://addons/gama_agent/localization_system.gd"
 
 [display]
 

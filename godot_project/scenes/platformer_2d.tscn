@@ -1,0 +1,40 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/platformer_player_2d.gd" id="1_script"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
+size = Vector2(1280, 48)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
+size = Vector2(36, 52)
+
+[node name="Platformer2D" type="Node2D"]
+
+[node name="Background" type="Polygon2D" parent="."]
+color = Color(0.05, 0.07, 0.12, 1)
+polygon = PackedVector2Array(0, 0, 1280, 0, 1280, 720, 0, 720)
+
+[node name="Floor" type="StaticBody2D" parent="."]
+position = Vector2(640, 680)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Floor"]
+shape = SubResource("RectangleShape2D_floor")
+
+[node name="FloorVisual" type="Polygon2D" parent="Floor"]
+color = Color(0.12, 0.85, 0.72, 1)
+polygon = PackedVector2Array(-640, -24, 640, -24, 640, 24, -640, 24)
+
+[node name="Player2D" type="CharacterBody2D" parent="."]
+position = Vector2(220, 560)
+script = ExtResource("1_script")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player2D"]
+shape = SubResource("RectangleShape2D_player")
+
+[node name="HeroVisual" type="Polygon2D" parent="Player2D"]
+color = Color(0.98, 0.78, 0.22, 1)
+polygon = PackedVector2Array(-18, -26, 18, -26, 18, 26, -18, 26)
+
+[node name="Camera2D" type="Camera2D" parent="Player2D"]
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0

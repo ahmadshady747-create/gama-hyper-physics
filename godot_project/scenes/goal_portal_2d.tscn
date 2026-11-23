@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/goal_portal_2d.gd" id="1_portal2d"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_portal2d"]
+radius = 28.0
+
+[node name="GoalPortal2D" type="Area2D" groups=["portals"]]
+script = ExtResource("1_portal2d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_portal2d")
+
+[node name="OuterRing" type="Polygon2D" parent="."]
+color = Color(0.0, 0.94, 0.82, 0.85)
+polygon = PackedVector2Array(0, -28, 24, -14, 24, 14, 0, 28, -24, 14, -24, -14)
+
+[node name="InnerCore" type="Polygon2D" parent="."]
+color = Color(0.95, 0.98, 1.0, 0.95)
+polygon = PackedVector2Array(0, -14, 14, 0, 0, 14, -14, 0)

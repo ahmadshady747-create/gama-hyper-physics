@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/boss_guardian_2d.gd" id="1_boss2d"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_boss"]
+radius = 42.0
+
+[node name="BossGuardian2D" type="CharacterBody2D" groups=["enemies", "bosses"]]
+script = ExtResource("1_boss2d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_boss")
+
+[node name="BossVisual" type="Polygon2D" parent="."]
+color = Color(0.75, 0.18, 0.96, 1)
+polygon = PackedVector2Array(0, -46, 40, -18, 32, 36, -32, 36, -40, -18)

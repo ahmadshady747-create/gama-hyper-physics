@@ -1,0 +1,54 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui_hud.tscn" id="1_scene"]
+[ext_resource type="PackedScene" path="res://scenes/mobile_touch_controls.tscn" id="2_scene"]
+[ext_resource type="Script" path="res://scripts/platformer_player_2d.gd" id="3_script"]
+[ext_resource type="PackedScene" path="res://scenes/pickup_coin_2d.tscn" id="4_scene"]
+[ext_resource type="PackedScene" path="res://scenes/hazard_spikes_2d.tscn" id="5_scene"]
+[ext_resource type="PackedScene" path="res://scenes/powerup_boost_2d.tscn" id="6_scene"]
+[ext_resource type="PackedScene" path="res://scenes/loot_chest_2d.tscn" id="7_scene"]
+[ext_resource type="PackedScene" path="res://scenes/dialogue_trigger_2d.tscn" id="8_scene"]
+[ext_resource type="PackedScene" path="res://scenes/enemy_chaser_2d.tscn" id="9_scene"]
+[ext_resource type="PackedScene" path="res://scenes/boss_guardian_2d.tscn" id="10_scene"]
+[ext_resource type="PackedScene" path="res://scenes/checkpoint_2d.tscn" id="11_scene"]
+[ext_resource type="PackedScene" path="res://scenes/goal_portal_2d.tscn" id="12_scene"]
+
+[node name="GridBossStage2D" type="Node2D"]
+
+[node name="GameHUD" parent="." instance=ExtResource("1_scene")]
+
+[node name="MobileTouchControls" parent="." instance=ExtResource("2_scene")]
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player"]]
+position = Vector2(120, 140)
+script = ExtResource("3_script")
+
+[node name="Camera2D_1" type="Camera2D" parent="Player"]
+position_smoothing_enabled = true
+
+[node name="Pickup_1" parent="." instance=ExtResource("4_scene")]
+position = Vector2(280, 140)
+
+[node name="HazardSpikes_1" parent="." instance=ExtResource("5_scene")]
+position = Vector2(440, 140)
+
+[node name="PowerupBoost_1" parent="." instance=ExtResource("6_scene")]
+position = Vector2(600, 140)
+
+[node name="LootChest_1" parent="." instance=ExtResource("7_scene")]
+position = Vector2(760, 140)
+
+[node name="DialogueTrigger_1" parent="." instance=ExtResource("8_scene")]
+position = Vector2(920, 140)
+
+[node name="Enemy_1" parent="." instance=ExtResource("9_scene")]
+position = Vector2(1080, 140)
+
+[node name="BossGuardian_1" parent="." instance=ExtResource("10_scene")]
+position = Vector2(1240, 140)
+
+[node name="Checkpoint_1" parent="." instance=ExtResource("11_scene")]
+position = Vector2(1400, 140)
+
+[node name="GoalPortal2D_1" parent="." instance=ExtResource("12_scene")]
+position = Vector2(1560, 140)

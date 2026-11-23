@@ -1,7 +1,7 @@
 {
     "name": "gama-hyper-physics",
-    "version": "5.0.0",
-    "description": "GAMA AI-Agent Game Engine (Stateful Game Runtime, 4 Game Archetypes, Headless SVG Visual Snapshots, One-Click HTML5 Exporter, Auto-Juice, Headless Auto-Playtester, Zero-GC Physics, 14-Tool MCP Server & Godot 4.3 Bridge with 7-Tool MCP Server, GDScript Auditor and Headless QA Runner)",
+    "version": "5.19.0",
+    "description": "GAMA AI-Agent Game Engine (Stateful Game Runtime, 4 Game Archetypes, Headless SVG Visual Snapshots, One-Click HTML5 Exporter, Auto-Juice, Headless Auto-Playtester, Zero-GC Physics, 14-Tool MCP Server & Godot 4.3 Bridge with 23-Tool MCP Server, 28-Rule GDScript Auditor & Auto-Healer, 5 Godot Archetypes, 35 Scenes and Headless QA Runner)",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "directories": {
@@ -22,7 +22,11 @@
         "test:godot": "tsx tests/godot_bridge_verification.ts",
         "start:mcp:godot": "tsx src/mcp/godot_mcp_server.ts",
         "mcp:godot": "tsx src/mcp/godot_mcp_server.ts",
+        "cli": "tsx src/cli.ts help",
+        "audit:gd": "tsx src/cli.ts audit",
         "qa:godot": "godot --headless --path godot_project --script res://addons/gama_agent/agent_qa_runner.gd -- --scene=res://scenes/main.tscn --frames=120",
+        "playtest:godot": "godot --headless --path godot_project --script res://addons/gama_agent/agent_playtest_bot.gd",
+        "screenshot:godot": "godot --rendering-driver opengl3 --path godot_project --script res://addons/gama_agent/agent_screenshot.gd",
         "sim": "tsx src/cli.ts",
         "sim:2d": "tsx src/cli.ts --dim 2d --bodies 50 --steps 300",
         "sim:3d": "tsx src/cli.ts --dim 3d --bodies 40 --steps 300",

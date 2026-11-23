@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/powerup_boost_2d.gd" id="1_boost2d"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_boost"]
+radius = 16.0
+
+[node name="PowerupBoost2D" type="Area2D" groups=["pickups", "powerups"]]
+script = ExtResource("1_boost2d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_boost")
+
+[node name="BoostVisual" type="Polygon2D" parent="."]
+color = Color(0.18, 0.94, 1.0, 1)
+polygon = PackedVector2Array(0, -18, 16, -4, 6, -4, 12, 18, -12, 2, -2, 2)

@@ -1,0 +1,55 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/touch_controls.gd" id="1_touch"]
+
+[node name="MobileTouchControls" type="CanvasLayer"]
+layer = 25
+script = ExtResource("1_touch")
+
+[node name="LeftPad" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 28.0
+offset_top = 560.0
+offset_right = 280.0
+offset_bottom = 690.0
+
+[node name="BtnLeft" type="Button" parent="LeftPad"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 20.0
+offset_right = 110.0
+offset_bottom = 110.0
+text = "< LEFT"
+
+[node name="BtnRight" type="Button" parent="LeftPad"]
+layout_mode = 0
+offset_left = 130.0
+offset_top = 20.0
+offset_right = 240.0
+offset_bottom = 110.0
+text = "RIGHT >"
+
+[node name="RightPad" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 980.0
+offset_top = 560.0
+offset_right = 1252.0
+offset_bottom = 690.0
+
+[node name="BtnAction" type="Button" parent="RightPad"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 20.0
+offset_right = 120.0
+offset_bottom = 110.0
+text = "ACTION"
+
+[node name="BtnJump" type="Button" parent="RightPad"]
+layout_mode = 0
+offset_left = 140.0
+offset_top = 20.0
+offset_right = 260.0
+offset_bottom = 110.0
+text = "JUMP"

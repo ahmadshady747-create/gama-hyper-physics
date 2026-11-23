@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/boss_sentinel_3d.gd" id="1_boss3d"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_boss"]
+radius = 1.25
+
+[sub_resource type="SphereMesh" id="SphereMesh_boss"]
+radius = 1.25
+height = 2.5
+
+[node name="BossSentinel3D" type="CharacterBody3D" groups=["enemies", "bosses"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, -6)
+script = ExtResource("1_boss3d")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_boss")
+
+[node name="BossMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_boss")

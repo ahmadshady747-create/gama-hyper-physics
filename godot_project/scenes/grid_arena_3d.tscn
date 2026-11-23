@@ -1,0 +1,63 @@
+[gd_scene load_steps=15 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui_hud.tscn" id="1_scene"]
+[ext_resource type="PackedScene" path="res://scenes/mobile_touch_controls.tscn" id="2_scene"]
+[ext_resource type="Script" path="res://scripts/demo_player.gd" id="3_script"]
+[ext_resource type="PackedScene" path="res://scenes/pickup_crystal_3d.tscn" id="4_scene"]
+[ext_resource type="PackedScene" path="res://scenes/health_pack_3d.tscn" id="5_scene"]
+[ext_resource type="PackedScene" path="res://scenes/jump_pad_3d.tscn" id="6_scene"]
+[ext_resource type="PackedScene" path="res://scenes/key_door_3d.tscn" id="7_scene"]
+[ext_resource type="PackedScene" path="res://scenes/moving_platform_3d.tscn" id="8_scene"]
+[ext_resource type="PackedScene" path="res://scenes/enemy_chaser_3d.tscn" id="9_scene"]
+[ext_resource type="PackedScene" path="res://scenes/turret_3d.tscn" id="10_scene"]
+[ext_resource type="PackedScene" path="res://scenes/boss_sentinel_3d.tscn" id="11_scene"]
+[ext_resource type="PackedScene" path="res://scenes/checkpoint_3d.tscn" id="12_scene"]
+[ext_resource type="PackedScene" path="res://scenes/goal_portal_3d.tscn" id="13_scene"]
+
+[node name="GridBossArena3D" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 14, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9, 14)
+current = true
+
+[node name="GameHUD" parent="." instance=ExtResource("1_scene")]
+
+[node name="MobileTouchControls" parent="." instance=ExtResource("2_scene")]
+
+[node name="Player3D" type="CharacterBody3D" parent="." groups=["player"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 1.2, 0)
+script = ExtResource("3_script")
+
+[node name="Pickup_1" parent="." instance=ExtResource("4_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.2, 0)
+
+[node name="HealthPack_1" parent="." instance=ExtResource("5_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 1, 0)
+
+[node name="JumpPad_1" parent="." instance=ExtResource("6_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.2, 0)
+
+[node name="KeyDoor_1" parent="." instance=ExtResource("7_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1.2, 0)
+
+[node name="MovingPlatform_1" parent="." instance=ExtResource("8_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+
+[node name="Enemy_1" parent="." instance=ExtResource("9_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1.4, 0)
+
+[node name="Turret_1" parent="." instance=ExtResource("10_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.8, 0)
+
+[node name="BossSentinel_1" parent="." instance=ExtResource("11_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 2.2, 0)
+
+[node name="Checkpoint3D_1" parent="." instance=ExtResource("12_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0, 0)
+
+[node name="GoalPortal3D_1" parent="." instance=ExtResource("13_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 1.2, 0)

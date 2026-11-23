@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/dialogue_trigger_2d.gd" id="1_dlg2d"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_dlg"]
+size = Vector2(56, 96)
+
+[node name="DialogueTrigger2D" type="Area2D" groups=["triggers"]]
+script = ExtResource("1_dlg2d")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_dlg")
+
+[node name="BeaconVisual" type="Polygon2D" parent="."]
+color = Color(0.55, 0.48, 1.0, 0.42)
+polygon = PackedVector2Array(-28, -48, 28, -48, 28, 48, -28, 48)

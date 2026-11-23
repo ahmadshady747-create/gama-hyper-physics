@@ -1,0 +1,52 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/hover_racer_3d.gd" id="1_hover"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_track"]
+size = Vector3(18, 1, 60)
+
+[sub_resource type="BoxMesh" id="BoxMesh_track"]
+size = Vector3(18, 1, 60)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pod"]
+size = Vector3(1.4, 0.6, 2.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pod"]
+size = Vector3(1.4, 0.6, 2.2)
+
+[sub_resource type="TorusMesh" id="TorusMesh_gate"]
+inner_radius = 2.4
+outer_radius = 2.8
+
+[node name="HoverRacer3D" type="Node3D"]
+
+[node name="SunLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 12, 0)
+shadow_enabled = true
+
+[node name="TrackFloor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, -16)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="TrackFloor"]
+shape = SubResource("BoxShape3D_track")
+
+[node name="TrackMesh" type="MeshInstance3D" parent="TrackFloor"]
+mesh = SubResource("BoxMesh_track")
+
+[node name="HoverPod" type="CharacterBody3D" parent="." groups=["player"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+script = ExtResource("1_hover")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HoverPod"]
+shape = SubResource("BoxShape3D_pod")
+
+[node name="HullMesh" type="MeshInstance3D" parent="HoverPod"]
+mesh = SubResource("BoxMesh_pod")
+
+[node name="SpeedGate" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.4, -10)
+mesh = SubResource("TorusMesh_gate")
+
+[node name="ChaseCamera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 4.2, 6.8)
+current = true

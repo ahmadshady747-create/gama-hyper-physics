@@ -1,0 +1,43 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/game_hud.gd" id="1_hud"]
+
+[node name="GameHUD" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_hud")
+
+[node name="TopBar" type="ColorRect" parent="."]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 540.0
+offset_bottom = 64.0
+color = Color(0.04, 0.06, 0.11, 0.82)
+
+[node name="ScoreLabel" type="Label" parent="TopBar"]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 310.0
+offset_bottom = 38.0
+text = "SCORE: 0  |  BEST: 0"
+
+[node name="HealthLabel" type="Label" parent="TopBar"]
+offset_left = 330.0
+offset_top = 12.0
+offset_right = 510.0
+offset_bottom = 38.0
+text = "HP: 100 / 100"
+
+[node name="PauseOverlay" type="ColorRect" parent="."]
+visible = false
+offset_left = 440.0
+offset_top = 280.0
+offset_right = 840.0
+offset_bottom = 420.0
+color = Color(0.02, 0.03, 0.06, 0.92)
+
+[node name="PauseTitle" type="Label" parent="PauseOverlay"]
+offset_left = 90.0
+offset_top = 52.0
+offset_right = 320.0
+offset_bottom = 88.0
+text = "PAUSED — PRESS ESC TO RESUME"

@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/health_pack_3d.gd" id="1_hp3d"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hp"]
+size = Vector3(0.75, 0.75, 0.75)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hp"]
+size = Vector3(0.7, 0.7, 0.7)
+
+[node name="HealthPack3D" type="Area3D" groups=["pickups", "healing"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 0)
+script = ExtResource("1_hp3d")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_hp")
+
+[node name="HealthMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_hp")
